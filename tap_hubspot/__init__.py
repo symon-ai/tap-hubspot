@@ -89,9 +89,11 @@ ENDPOINTS = {
 
     "engagements_all":        "/engagements/v1/engagements/paged",
 
+    "contact_lists":        "/contacts/v1/lists",
+    "contact_list":         "/contacts/v1/lists/{list_id}/contacts/all",
+
     "subscription_changes": "/email/public/v1/subscriptions/timeline",
     "email_events":         "/email/public/v1/events",
-    "contact_lists":        "/contacts/v1/lists",
     "forms":                "/forms/v2/forms",
     "workflows":            "/automation/v3/workflows",
     "owners":               "/owners/v2/owners",
@@ -189,7 +191,8 @@ def load_associated_company_schema():
     return associated_company_schema
 
 def load_schema(entity_name):
-    schema = utils.load_json(get_abs_path('schemas/{}.json'.format(entity_name)))
+    entity_class = entity_name.split(":")[0]
+    schema = utils.load_json(get_abs_path('schemas/{}.json'.format(entity_class)))
     if entity_name in ["contacts", "companies", "deals"]:
         custom_schema = get_custom_schema(entity_name)
 
@@ -392,7 +395,7 @@ def get_v3_deals(v3_fields, v1_data):
     return v3_resp.json()['results']
 
 #pylint: disable=line-too-long
-def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, offset_targets, v3_fields=None):
+def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, offset_targets, v3_fields=None, write_state=True):
     if len(offset_keys) != len(offset_targets):
         raise ValueError("Number of offset_keys must match number of offset_targets")
 
@@ -427,13 +430,15 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
                     params[target] = data[key]
                     STATE = singer.set_offset(STATE, tap_stream_id, target, data[key])
 
-            singer.write_state(STATE)
+            if (write_state):
+                singer.write_state(STATE)
 
     STATE = singer.clear_offset(STATE, tap_stream_id)
-    singer.write_state(STATE)
+    if (write_state):
+        singer.write_state(STATE)
 
 
-def _sync_contact_vids(catalog, vids, schema, bumble_bee):
+def _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_name = "contacts"):
     if len(vids) == 0:
         return
 
@@ -443,7 +448,7 @@ def _sync_contact_vids(catalog, vids, schema, bumble_bee):
 
     for record in data.values():
         record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
-        singer.write_record("contacts", record, catalog.get('stream_alias'), time_extracted=time_extracted)
+        singer.write_record(stream_name, record, catalog.get('stream_alias'), time_extracted=time_extracted)
 
 default_contact_params = {
     'showListMemberships': True,
@@ -929,6 +934,51 @@ def sync_deal_pipelines(STATE, ctx):
     singer.write_state(STATE)
     return STATE
 
+def sync_contact_list(STATE, ctx):
+    bookmark_key = 'versionTimestamp'
+    stream_id = singer.get_currently_syncing(STATE)
+    stream_class = stream_id.split(":")[0]
+    list_id = stream_id.split(":")[1]
+    list_name = stream_id.split(":")[2]
+    
+    catalog = ctx.get_catalog_from_id(stream_id)
+    start = utils.strptime_with_tz(get_start(STATE, stream_id, bookmark_key))
+    LOGGER.info('sync_contact_list: %s from %s', list_name, bookmark_key)
+
+    max_bk_value = start
+    schema = load_schema(stream_class)
+
+    singer.write_schema(stream_id, schema, ["vid"], [bookmark_key], catalog.get('stream_alias'))
+
+    url = get_url("contact_list", list_id = list_id)
+
+    vids = []
+    with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
+        for row in gen_request(STATE, stream_id, url, default_contact_params, 'contacts', 'has-more', ['vid-offset'], ['vidOffset']):
+            modified_time = None
+            if bookmark_key in row:
+                modified_time = utils.strptime_with_tz(
+                    _transform_datetime( # pylint: disable=protected-access
+                        row[bookmark_key],
+                        UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING))
+
+            if not modified_time or modified_time >= start:
+                vids.append(row['vid'])
+
+            if modified_time and modified_time >= max_bk_value:
+                max_bk_value = modified_time
+
+            if len(vids) == 100:
+                _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_id)
+                vids = []
+
+        _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_id)
+
+    STATE = singer.write_bookmark(STATE, stream_id, bookmark_key, utils.strftime(max_bk_value))
+    singer.write_state(STATE)
+    return STATE
+
+
 @attr.s
 class Stream(object):
     tap_stream_id = attr.ib()
@@ -1072,6 +1122,19 @@ def do_discover():
     LOGGER.info('Loading schemas')
     json.dump(discover_schemas(), sys.stdout, indent=4)
 
+def discover_contact_list_streams():
+    STATE = {}
+    url = get_url("contact_lists")
+    params = {'count': 250}
+    for list in gen_request(STATE, 'contact_lists', url, params, "lists", "has-more", ["offset"], ["offset"], write_state=False):
+        stream_id = "contact_list:{}:{}".format(list['listId'], list['name'])
+        stream = Stream(stream_id, sync_contact_list, ["vid"], 'versionTimestamp', 'FULL_TABLE'),
+        STREAMS.append(stream[0])
+
+def discover_additional_streams():
+    LOGGER.info('Discovering additional streams...')
+    discover_contact_list_streams()
+
 def main_impl():
     args = utils.parse_args(
         ["redirect_uri",
@@ -1085,6 +1148,8 @@ def main_impl():
 
     if args.state:
         STATE.update(args.state)
+
+    discover_additional_streams()
 
     if args.discover:
         do_discover()

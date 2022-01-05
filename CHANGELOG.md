@@ -1,5 +1,9 @@
 # Changelog
 
+
+## 2.9.7
+  * Add support for importing contact list contents [WP-7832](https://varicent.atlassian.net/browse/WP-7832)
+
 ## 2.9.6
   * Remove contacts_by_company from discovery [#15](https://github.com/symon-ai/target-s3-csv/pull/15)
 ## 2.9.5
