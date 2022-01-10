@@ -90,7 +90,7 @@ ENDPOINTS = {
     "engagements_all":        "/engagements/v1/engagements/paged",
 
     "contact_lists":        "/contacts/v1/lists",
-    "contact_list":         "/contacts/v1/lists/{list_id}/contacts/all",
+    "contact_list_contacts":"/contacts/v1/lists/{list_id}/contacts/all",
 
     "subscription_changes": "/email/public/v1/subscriptions/timeline",
     "email_events":         "/email/public/v1/events",
@@ -395,11 +395,11 @@ def get_v3_deals(v3_fields, v1_data):
     return v3_resp.json()['results']
 
 #pylint: disable=line-too-long
-def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, offset_targets, v3_fields=None, write_state=True):
+def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, offset_targets, v3_fields=None):
     if len(offset_keys) != len(offset_targets):
         raise ValueError("Number of offset_keys must match number of offset_targets")
 
-    if singer.get_offset(STATE, tap_stream_id):
+    if STATE is not None and singer.get_offset(STATE, tap_stream_id):
         params.update(singer.get_offset(STATE, tap_stream_id))
 
     with metrics.record_counter(tap_stream_id) as counter:
@@ -423,18 +423,21 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
 
             if not data.get(more_key, False):
                 break
+            
+            if STATE is not None:
+                STATE = singer.clear_offset(STATE, tap_stream_id)
 
-            STATE = singer.clear_offset(STATE, tap_stream_id)
             for key, target in zip(offset_keys, offset_targets):
                 if key in data:
                     params[target] = data[key]
-                    STATE = singer.set_offset(STATE, tap_stream_id, target, data[key])
+                    if STATE is not None:
+                        STATE = singer.set_offset(STATE, tap_stream_id, target, data[key])
 
-            if (write_state):
+            if STATE is not None:
                 singer.write_state(STATE)
 
-    STATE = singer.clear_offset(STATE, tap_stream_id)
-    if (write_state):
+    if STATE is not None:
+        STATE = singer.clear_offset(STATE, tap_stream_id)
         singer.write_state(STATE)
 
 
@@ -934,7 +937,7 @@ def sync_deal_pipelines(STATE, ctx):
     singer.write_state(STATE)
     return STATE
 
-def sync_contact_list(STATE, ctx):
+def sync_contact_list_contacts(STATE, ctx):
     bookmark_key = 'versionTimestamp'
     stream_id = singer.get_currently_syncing(STATE)
     stream_class = stream_id.split(":")[0]
@@ -950,7 +953,7 @@ def sync_contact_list(STATE, ctx):
 
     singer.write_schema(stream_id, schema, ["vid"], [bookmark_key], catalog.get('stream_alias'))
 
-    url = get_url("contact_list", list_id = list_id)
+    url = get_url("contact_list_contacts", list_id = list_id)
 
     vids = []
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
@@ -1028,6 +1031,7 @@ def get_selected_streams(remaining_streams, ctx):
 def do_sync(STATE, catalog):
     # Clear out keys that are no longer used
     clean_state(STATE)
+    populate_streams_from_catalog(catalog)
 
     ctx = Context(catalog)
     validate_dependencies(ctx)
@@ -1051,6 +1055,15 @@ def do_sync(STATE, catalog):
     STATE = singer.set_currently_syncing(STATE, None)
     singer.write_state(STATE)
     LOGGER.info("Sync completed")
+
+def populate_streams_from_catalog(catalog):
+    for stream in catalog.get('streams'):
+        stream_id = stream['tap_stream_id']
+        # Populating contact lists
+        if (stream_id.startswith('contact_list:')):
+            LOGGER.info('Populating contact list stream "%s"', stream_id)
+            stream = Stream(stream_id, sync_contact_list_contacts, ["vid"], 'versionTimestamp', 'FULL_TABLE')
+            STREAMS.append(stream)
 
 class Context(object):
     def __init__(self, catalog):
@@ -1119,21 +1132,19 @@ def discover_schemas():
     return result
 
 def do_discover():
+    LOGGER.info('Discovering additional streams')
+    discover_contact_list_streams()
     LOGGER.info('Loading schemas')
     json.dump(discover_schemas(), sys.stdout, indent=4)
 
 def discover_contact_list_streams():
-    STATE = {}
+    LOGGER.info('Discovering contact lists')
     url = get_url("contact_lists")
     params = {'count': 250}
-    for list in gen_request(STATE, 'contact_lists', url, params, "lists", "has-more", ["offset"], ["offset"], write_state=False):
+    for list in gen_request(None, 'contact_lists', url, params, "lists", "has-more", ["offset"], ["offset"]):
         stream_id = "contact_list:{}:{}".format(list['listId'], list['name'])
-        stream = Stream(stream_id, sync_contact_list, ["vid"], 'versionTimestamp', 'FULL_TABLE'),
-        STREAMS.append(stream[0])
-
-def discover_additional_streams():
-    LOGGER.info('Discovering additional streams...')
-    discover_contact_list_streams()
+        stream = Stream(stream_id, sync_contact_list_contacts, ["vid"], 'versionTimestamp', 'FULL_TABLE')
+        STREAMS.append(stream)
 
 def main_impl():
     args = utils.parse_args(
@@ -1148,8 +1159,6 @@ def main_impl():
 
     if args.state:
         STATE.update(args.state)
-
-    discover_additional_streams()
 
     if args.discover:
         do_discover()
