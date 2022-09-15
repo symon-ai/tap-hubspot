@@ -31,6 +31,30 @@ To run `tap-hubspot` with the configuration file, use this command:
 › tap-hubspot -c my-config.json
 ```
 
+### Install and Run
+
+Ensure poetry is installed on your machine. 
+
+- This command will return the installed version of poetry if it is installed.
+```
+poetry --version
+```
+
+- If not, install poetry using the following commands (from https://python-poetry.org/docs/#installation):
+```
+curl -sSL https://install.python-poetry.org | python3 -
+PATH=~/.local/bin:$PATH
+```
+
+Within the `tap-hubspot` directory, install dependencies:
+```
+poetry install
+```
+
+Then run the tap:
+```
+poetry run tap-hubspot <options>
+```
 
 ## API Key Authentication (for development)
 
