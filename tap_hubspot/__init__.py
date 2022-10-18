@@ -1311,7 +1311,7 @@ def main_impl():
          "refresh_token",
          "start_date"])
 
-    LOGGER.info(f'{args=}')
+    LOGGER.info(f'{args}')
 
     CONFIG.update(args.config)
     STATE = {}
