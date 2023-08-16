@@ -196,16 +196,19 @@ def load_schema(entity_name):
     if entity_name in ["contacts", "companies", "deals"]:
         custom_schema = get_custom_schema(entity_name)
 
-        schema['properties']['properties'] = {
-            "type": "object",
-            "properties": custom_schema,
-        }
+        if entity_name != "deals":
+            schema['properties']['properties'] = {
+                "type": "object",
+                "properties": custom_schema,
+            }
 
         if entity_name in ["deals"]:
             v3_schema = get_v3_schema(entity_name)
             for key, value in v3_schema.items():
                 if any(prefix in key for prefix in V3_PREFIXES):
                     custom_schema[key] = value
+            
+            del schema['properties']['associations']
 
         # Move properties to top level
         custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
