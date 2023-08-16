@@ -628,7 +628,7 @@ def sync_deals(STATE, ctx):
     v3_fields = None
     has_selected_properties = mdata.get(('properties', 'properties'), {}).get('selected')
     # commented out below so that we have all the propeties
-    # if has_selected_properties or has_selected_custom_field(mdata) or True:
+    # if has_selected_properties or has_selected_custom_field(mdata):
     
     # On 2/12/20, hubspot added a lot of additional properties for
     # deals, and appending all of them to requests ended up leading to
