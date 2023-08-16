@@ -168,7 +168,7 @@ def get_field_schema(field_type, extras=False):
 
 def parse_custom_schema(entity_name, data):
     return {
-        field['name']: get_field_schema(field['type'], entity_name != 'contacts')
+        field['name']: get_field_schema(field['type'], entity_name != 'contacts' and entity_name != 'deals')
         for field in data
     }
 
@@ -211,9 +211,11 @@ def load_schema(entity_name):
         custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
         schema['properties'].update(custom_schema_top_level)
 
+        # removing properties_versions for Symon Import
         # Make properties_versions selectable and share the same schema.
-        versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
-        schema['properties']['properties_versions'] = versions_schema
+        if entity_name != "deals":
+            versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
+            schema['properties']['properties_versions'] = versions_schema
 
     if entity_name == "contacts":
         schema['properties']['associated-company'] = load_associated_company_schema()
@@ -622,21 +624,23 @@ def sync_deals(STATE, ctx):
 
     v3_fields = None
     has_selected_properties = mdata.get(('properties', 'properties'), {}).get('selected')
-    if has_selected_properties or has_selected_custom_field(mdata):
-        # On 2/12/20, hubspot added a lot of additional properties for
-        # deals, and appending all of them to requests ended up leading to
-        # 414 (url-too-long) errors. Hubspot recommended we use the
-        # `includeAllProperties` and `allpropertiesFetchMode` params
-        # instead.
-        params['includeAllProperties'] = True
-        params['allPropertiesFetchMode'] = 'latest_version'
+    # commented out below so that we have all the propeties
+    # if has_selected_properties or has_selected_custom_field(mdata) or True:
+    
+    # On 2/12/20, hubspot added a lot of additional properties for
+    # deals, and appending all of them to requests ended up leading to
+    # 414 (url-too-long) errors. Hubspot recommended we use the
+    # `includeAllProperties` and `allpropertiesFetchMode` params
+    # instead.
+    params['includeAllProperties'] = True
+    params['allPropertiesFetchMode'] = 'latest_version'
 
-        # Grab selected `hs_date_entered/exited` fields to call the v3 endpoint with
-        v3_fields = [breadcrumb[1].replace('property_', '')
-                     for breadcrumb, mdata_map in mdata.items()
-                     if breadcrumb
-                     and (mdata_map.get('selected') == True or has_selected_properties)
-                     and any(prefix in breadcrumb[1] for prefix in V3_PREFIXES)]
+    # Grab selected `hs_date_entered/exited` fields to call the v3 endpoint with
+    v3_fields = [breadcrumb[1].replace('property_', '')
+                    for breadcrumb, mdata_map in mdata.items()
+                    if breadcrumb
+                    and (mdata_map.get('selected') == True or has_selected_properties)
+                    and any(prefix in breadcrumb[1] for prefix in V3_PREFIXES)]
 
     url = get_url('deals_all')
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
