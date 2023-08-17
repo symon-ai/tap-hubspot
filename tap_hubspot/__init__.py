@@ -44,7 +44,7 @@ CONTACTS_BY_COMPANY = "contacts_by_company"
 
 DEFAULT_CHUNK_SIZE = 1000 * 60 * 60 * 24
 
-V3_PREFIXES = {'hs_date_entered', 'hs_date_exited', 'hs_time_in'}
+V3_LABEL_PREFIXES = {'Date entered', 'Date exited', 'Time in'}
 
 CONFIG = {
     "access_token": None,
@@ -167,8 +167,13 @@ def get_field_schema(field_type, extras=False):
         }
 
 def parse_custom_schema(entity_name, data):
+    if entity_name == 'deals':
+        return {
+        field['label']: get_field_type_schema(field['type'])
+        for field in data
+    }
     return {
-        field['name']: get_field_schema(field['type'], entity_name != 'contacts' and entity_name != 'deals')
+        field['name']: get_field_schema(field['type'], entity_name != 'contacts')
         for field in data
     }
 
@@ -196,27 +201,34 @@ def load_schema(entity_name):
     if entity_name in ["contacts", "companies", "deals"]:
         custom_schema = get_custom_schema(entity_name)
 
-        if entity_name != "deals":
-            schema['properties']['properties'] = {
-                "type": "object",
-                "properties": custom_schema,
-            }
+        # moved this part to elif block below
+        # if entity_name != "deals":
+        #     schema['properties']['properties'] = {
+        #         "type": "object",
+        #         "properties": custom_schema,
+        #     }
 
         if entity_name in ["deals"]:
             v3_schema = get_v3_schema(entity_name)
             for key, value in v3_schema.items():
-                if any(prefix in key for prefix in V3_PREFIXES):
+                if any(prefix in key for prefix in V3_LABEL_PREFIXES):
                     custom_schema[key] = value
             
             del schema['properties']['associations']
+            schema['properties'].update(custom_schema)
 
-        # Move properties to top level
-        custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
-        schema['properties'].update(custom_schema_top_level)
+        # original code processes below code without if statement. added entity_name check for deals as we are treating it differently for POC
+        # Need to change code later when fix other tables 
+        elif entity_name != "deals":
+            schema['properties']['properties'] = {
+                "type": "object",
+                "properties": custom_schema,
+            }
+            # Move properties to top level
+            custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
+            schema['properties'].update(custom_schema_top_level)
 
-        # removing properties_versions for Symon Import
-        # Make properties_versions selectable and share the same schema.
-        if entity_name != "deals":
+            # Make properties_versions selectable and share the same schema.
             versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
             schema['properties']['properties_versions'] = versions_schema
 
@@ -603,6 +615,14 @@ def has_selected_custom_field(mdata):
             return True
     return False
 
+#TODO for POC
+def get_properties_id_to_label_map(entity_name):
+    data = request(get_url(entity_name + "_properties")).json()
+    id_to_label_map = {}
+    for item in data:
+        id_to_label_map[item["name"]] = item["label"]
+    return id_to_label_map
+
 def sync_deals(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
     mdata = metadata.to_map(catalog.get('metadata'))
@@ -646,6 +666,7 @@ def sync_deals(STATE, ctx):
                     and any(prefix in breadcrumb[1] for prefix in V3_PREFIXES)]
 
     url = get_url('deals_all')
+    properties_id_to_label_map = get_properties_id_to_label_map("deals")
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in gen_request(STATE, 'deals', url, params, 'deals', "hasMore", ["offset"], ["offset"], v3_fields=v3_fields):
             row_properties = row['properties']
@@ -662,8 +683,19 @@ def sync_deals(STATE, ctx):
                 max_bk_value = modified_time
 
             if not modified_time or modified_time >= start:
-                record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+                for k, v in row["properties"].items():
+                    label = properties_id_to_label_map.get(k, None)
+                    if label:
+                        row[label] = v["value"]
+                    else:
+                        LOGGER.info(f'Response from GET deals include field that is not present in GET deals/properties: {k}')
+                del row['properties']
+
+                # record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+                record = bumble_bee.transform(row, schema, mdata)
                 singer.write_record("deals", record, catalog.get('stream_alias'), time_extracted=utils.now())
+            else:
+                LOGGER.info(f'Skipping row as modified time is less than start_time')
 
     STATE = singer.write_bookmark(STATE, 'deals', bookmark_key, utils.strftime(max_bk_value))
     singer.write_state(STATE)
@@ -1010,7 +1042,7 @@ STREAMS = [
     Stream('contact_lists', sync_contact_lists, ["listId"], 'updatedAt', 'FULL_TABLE'),
     Stream('contacts', sync_contacts, ["vid"], 'versionTimestamp', 'FULL_TABLE'),
     Stream('companies', sync_companies, ["companyId"], 'hs_lastmodifieddate', 'FULL_TABLE'),
-    Stream('deals', sync_deals, ["dealId"], 'hs_lastmodifieddate', 'FULL_TABLE'),
+    Stream('deals', sync_deals, ["dealId"], 'Last Modified Date', 'FULL_TABLE'),
     Stream('deal_pipelines', sync_deal_pipelines, ['pipelineId'], None, 'FULL_TABLE'),
     Stream('engagements', sync_engagements, ["engagement_id"], 'lastUpdated', 'FULL_TABLE')
 ]
@@ -1129,6 +1161,8 @@ def load_discovered_schema(stream):
 def discover_schemas():
     result = {'streams': []}
     for stream in STREAMS:
+        if stream.tap_stream_id != 'deals': continue
+
         LOGGER.info('Loading schema for %s', stream.tap_stream_id)
         schema, mdata = load_discovered_schema(stream)
         result['streams'].append({'stream': stream.tap_stream_id,
