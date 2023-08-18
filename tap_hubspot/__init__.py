@@ -1161,7 +1161,6 @@ def load_discovered_schema(stream):
 def discover_schemas():
     result = {'streams': []}
     for stream in STREAMS:
-        if stream.tap_stream_id != 'deals': continue
 
         LOGGER.info('Loading schema for %s', stream.tap_stream_id)
         schema, mdata = load_discovered_schema(stream)
