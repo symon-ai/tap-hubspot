@@ -167,7 +167,7 @@ def get_field_schema(field_type, extras=False):
         }
 
 def parse_custom_schema(entity_name, data):
-    if entity_name == 'deals':
+    if entity_name in ['deals', 'companies']:
         return {
         field['label']: get_field_type_schema(field['type'])
         for field in data
@@ -201,13 +201,6 @@ def load_schema(entity_name):
     if entity_name in ["contacts", "companies", "deals"]:
         custom_schema = get_custom_schema(entity_name)
 
-        # moved this part to elif block below
-        # if entity_name != "deals":
-        #     schema['properties']['properties'] = {
-        #         "type": "object",
-        #         "properties": custom_schema,
-        #     }
-
         if entity_name in ["deals"]:
             v3_schema = get_v3_schema(entity_name)
             for key, value in v3_schema.items():
@@ -215,22 +208,23 @@ def load_schema(entity_name):
                     custom_schema[key] = value
             
             del schema['properties']['associations']
-            schema['properties'].update(custom_schema)
+        
+        schema['properties'].update(custom_schema)
 
         # original code processes below code without if statement. added entity_name check for deals as we are treating it differently for POC
         # Need to change code later when fix other tables 
-        elif entity_name != "deals":
-            schema['properties']['properties'] = {
-                "type": "object",
-                "properties": custom_schema,
-            }
-            # Move properties to top level
-            custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
-            schema['properties'].update(custom_schema_top_level)
+        # elif entity_name not in ["deals", "companies"]:
+        #     # schema['properties']['properties'] = {
+        #     #     "type": "object",
+        #     #     "properties": custom_schema,
+        #     # }
+        #     # Move properties to top level
+        #     custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
+        #     schema['properties'].update(custom_schema_top_level)
 
-            # Make properties_versions selectable and share the same schema.
-            versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
-            schema['properties']['properties_versions'] = versions_schema
+        #     # Make properties_versions selectable and share the same schema.
+        #     versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
+        #     schema['properties']['properties_versions'] = versions_schema
 
     if entity_name == "contacts":
         schema['properties']['associated-company'] = load_associated_company_schema()
@@ -577,6 +571,8 @@ def sync_companies(STATE, ctx):
     if CONTACTS_BY_COMPANY in ctx.selected_stream_ids:
         contacts_by_company_schema = load_schema(CONTACTS_BY_COMPANY)
         singer.write_schema("contacts_by_company", contacts_by_company_schema, ["company-id", "contact-id"])
+    
+    properties_id_to_label_map = get_properties_id_to_label_map("companies")
 
     with bumble_bee:
         for row in gen_request(STATE, 'companies', url, default_company_params, 'companies', 'has-more', ['offset'], ['offset']):
@@ -596,6 +592,14 @@ def sync_companies(STATE, ctx):
 
             if not modified_time or modified_time >= start:
                 record = request(get_url("companies_detail", company_id=row['companyId'])).json()
+                for k, v in record["properties"].items():
+                    label = properties_id_to_label_map.get(k, None)
+                    if label:
+                        record[label] = v["value"]
+                    else:
+                        LOGGER.info(f'Response from GET deals include field that is not present in GET deals/properties: {k}')
+                del record['properties']
+
                 record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
                 singer.write_record("companies", record, catalog.get('stream_alias'), time_extracted=utils.now())
                 if CONTACTS_BY_COMPANY in ctx.selected_stream_ids:
