@@ -167,7 +167,7 @@ def get_field_schema(field_type, extras=False):
         }
 
 def parse_custom_schema(entity_name, data):
-    if entity_name in ['deals', 'companies']:
+    if entity_name in ['deals', 'companies', 'contacts']:
         return {
         field['label']: get_field_type_schema(field['type'])
         for field in data
@@ -455,13 +455,37 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
 def _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_name = "contacts"):
     if len(vids) == 0:
         return
+    
+    contacts_properties_id_label_map = get_properties_id_to_label_map('contacts')
+    companies_properties_id_label_map = get_properties_id_to_label_map('companies')
+    
 
     data = request(get_url("contacts_detail"), params={'vid': vids, 'showListMemberships' : True, "formSubmissionMode" : "all"}).json()
     time_extracted = utils.now()
     mdata = metadata.to_map(catalog.get('metadata'))
 
     for record in data.values():
-        record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
+        # record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
+        for k, v in record['properties'].items():
+            contact_property_label = contacts_properties_id_label_map.get(k, None)
+            if contact_property_label: 
+                record[contact_property_label] = v['value']
+            else:
+                record[k] = v['value']
+                LOGGER.info(f'Response from GET contact_details includes vid that is not present in GET contacts_properties: {k}')
+        del record['properties']
+
+        if 'associated-company' in record:
+            for k, v in record['associated-company']['properties'].items():
+                company_property_label = companies_properties_id_label_map.get(k, None)
+                if company_property_label:
+                    record['associated-company'][company_property_label] = v['value']
+                else:
+                    record['associated-company'][k] = v['value']
+                    LOGGER.info(f'Response from GET contact_details includes vid that is not present in GET contacts_properties: {k}')
+            del record['associated-company']['properties']
+
+        record = bumble_bee.transform(record, schema, mdata)
         singer.write_record(stream_name, record, catalog.get('stream_alias'), time_extracted=time_extracted)
 
 default_contact_params = {
