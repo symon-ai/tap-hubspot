@@ -466,25 +466,10 @@ def _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_name = "contact
     mdata = metadata.to_map(catalog.get('metadata'))
 
     for record in data.values():
-        # record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
-        for k, v in record['properties'].items():
-            contact_property_label = contacts_properties_name_label_map.get(k, None)
-            if contact_property_label: 
-                record[contact_property_label] = v['value']
-            else:
-                record[k] = v['value']
-                LOGGER.info(f'Response from GET contact_details includes vid that is not present in GET contacts_properties: {k}')
-        del record['properties']
+        record = update_field_name_to_label(record, contacts_properties_name_label_map)
 
         if 'associated-company' in record:
-            for k, v in record['associated-company']['properties'].items():
-                company_property_label = companies_properties_name_label_map.get(k, None)
-                if company_property_label:
-                    record['associated-company'][company_property_label] = v['value']
-                else:
-                    record['associated-company'][k] = v['value']
-                    LOGGER.info(f'Response from GET contact_details includes vid that is not present in GET contacts_properties: {k}')
-            del record['associated-company']['properties']
+            record['associated-company'] = update_field_name_to_label(record['associated-company'], companies_properties_name_label_map)
 
         record = bumble_bee.transform(record, schema, mdata)
         singer.write_record(stream_name, record, catalog.get('stream_alias'), time_extracted=time_extracted)
@@ -617,13 +602,7 @@ def sync_companies(STATE, ctx):
 
             if not modified_time or modified_time >= start:
                 record = request(get_url("companies_detail", company_id=row['companyId'])).json()
-                for k, v in record["properties"].items():
-                    label = properties_name_to_label_map.get(k, None)
-                    if label:
-                        record[label] = v["value"]
-                    else:
-                        LOGGER.info(f'Response from GET deals include field that is not present in GET deals/properties: {k}')
-                del record['properties']
+                record = update_field_name_to_label(record, properties_name_to_label_map)
 
                 record = bumble_bee.transform(record, schema, mdata)
                 singer.write_record("companies", record, catalog.get('stream_alias'), time_extracted=utils.now())
@@ -653,6 +632,18 @@ def get_properties_name_to_label_map(entity_name):
     for item in data:
         name_to_label_map[item["name"]] = item["label"]
     return name_to_label_map
+
+def update_field_name_to_label(data, map):
+    for k, v in data['properties'].items():
+        label = map.get(k, None)
+        if label:
+            data[label] = v["value"]
+        else:
+            data[k] = v["value"]
+    
+    del data['properties']
+    
+    return data
 
 def sync_deals(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
@@ -715,13 +706,7 @@ def sync_deals(STATE, ctx):
                 max_bk_value = modified_time
 
             if not modified_time or modified_time >= start:
-                for k, v in row["properties"].items():
-                    label = properties_name_to_label_map.get(k, None)
-                    if label:
-                        row[label] = v["value"]
-                    else:
-                        LOGGER.info(f'Response from GET deals include field that is not present in GET deals/properties: {k}')
-                del row['properties']
+                row = update_field_name_to_label(row, properties_name_to_label_map)
 
                 # record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
                 record = bumble_bee.transform(row, schema, mdata)
