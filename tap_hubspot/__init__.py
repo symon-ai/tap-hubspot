@@ -45,6 +45,7 @@ CONTACTS_BY_COMPANY = "contacts_by_company"
 DEFAULT_CHUNK_SIZE = 1000 * 60 * 60 * 24
 
 V3_LABEL_PREFIXES = {'Date entered', 'Date exited', 'Time in'}
+V3_PREFIXES = {'hs_date_entered', 'hs_date_exited', 'hs_time_in'}
 
 CONFIG = {
     "access_token": None,
@@ -166,24 +167,24 @@ def get_field_schema(field_type, extras=False):
             }
         }
 
-def parse_custom_schema(entity_name, data):
-    if entity_name in ['deals', 'companies', 'contacts']:
+def parse_custom_schema(data, use_label):
+    if use_label:
         return {
         field['label']: get_field_type_schema(field['type'])
         for field in data
     }
     return {
-        field['name']: get_field_schema(field['type'], entity_name != 'contacts')
+        field['name']: get_field_type_schema(field['type'])
         for field in data
     }
 
 
-def get_custom_schema(entity_name):
-    return parse_custom_schema(entity_name, request(get_url(entity_name + "_properties")).json())
+def get_custom_schema(entity_name, use_label=True):
+    return parse_custom_schema(request(get_url(entity_name + "_properties")).json(), use_label)
 
-def get_v3_schema(entity_name):
+def get_v3_schema(use_label=True):
     url = get_url("deals_v3_properties")
-    return parse_custom_schema(entity_name, request(url).json()['results'])
+    return parse_custom_schema(request(url).json()['results'], use_label)
 
 def get_abs_path(path):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), path)
@@ -202,7 +203,7 @@ def load_schema(entity_name):
         custom_schema = get_custom_schema(entity_name)
 
         if entity_name in ["deals"]:
-            v3_schema = get_v3_schema(entity_name)
+            v3_schema = get_v3_schema()
             for key, value in v3_schema.items():
                 if any(prefix in key for prefix in V3_LABEL_PREFIXES):
                     custom_schema[key] = value
@@ -391,7 +392,7 @@ def process_v3_deals_records(v3_data):
     for record in v3_data:
         new_properties = {field_name : {'value': field_value}
                           for field_name, field_value in record['properties'].items()
-                          if any(prefix in field_name for prefix in V3_PREFIXES)}
+                          if any(prefix in field_name for prefix in V3_LABEL_PREFIXES)}
         transformed_v3_data.append({**record, 'properties' : new_properties})
     return transformed_v3_data
 
@@ -456,8 +457,8 @@ def _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_name = "contact
     if len(vids) == 0:
         return
     
-    contacts_properties_id_label_map = get_properties_id_to_label_map('contacts')
-    companies_properties_id_label_map = get_properties_id_to_label_map('companies')
+    contacts_properties_name_label_map = get_properties_name_to_label_map('contacts')
+    companies_properties_name_label_map = get_properties_name_to_label_map('companies')
     
 
     data = request(get_url("contacts_detail"), params={'vid': vids, 'showListMemberships' : True, "formSubmissionMode" : "all"}).json()
@@ -467,7 +468,7 @@ def _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_name = "contact
     for record in data.values():
         # record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
         for k, v in record['properties'].items():
-            contact_property_label = contacts_properties_id_label_map.get(k, None)
+            contact_property_label = contacts_properties_name_label_map.get(k, None)
             if contact_property_label: 
                 record[contact_property_label] = v['value']
             else:
@@ -477,7 +478,7 @@ def _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_name = "contact
 
         if 'associated-company' in record:
             for k, v in record['associated-company']['properties'].items():
-                company_property_label = companies_properties_id_label_map.get(k, None)
+                company_property_label = companies_properties_name_label_map.get(k, None)
                 if company_property_label:
                     record['associated-company'][company_property_label] = v['value']
                 else:
@@ -596,7 +597,7 @@ def sync_companies(STATE, ctx):
         contacts_by_company_schema = load_schema(CONTACTS_BY_COMPANY)
         singer.write_schema("contacts_by_company", contacts_by_company_schema, ["company-id", "contact-id"])
     
-    properties_id_to_label_map = get_properties_id_to_label_map("companies")
+    properties_name_to_label_map = get_properties_name_to_label_map("companies")
 
     with bumble_bee:
         for row in gen_request(STATE, 'companies', url, default_company_params, 'companies', 'has-more', ['offset'], ['offset']):
@@ -617,7 +618,7 @@ def sync_companies(STATE, ctx):
             if not modified_time or modified_time >= start:
                 record = request(get_url("companies_detail", company_id=row['companyId'])).json()
                 for k, v in record["properties"].items():
-                    label = properties_id_to_label_map.get(k, None)
+                    label = properties_name_to_label_map.get(k, None)
                     if label:
                         record[label] = v["value"]
                     else:
@@ -644,12 +645,14 @@ def has_selected_custom_field(mdata):
     return False
 
 #TODO for POC
-def get_properties_id_to_label_map(entity_name):
+def get_properties_name_to_label_map(entity_name):
     data = request(get_url(entity_name + "_properties")).json()
-    id_to_label_map = {}
+    if entity_name == "deals_v3":
+        data = data["results"]
+    name_to_label_map = {}
     for item in data:
-        id_to_label_map[item["name"]] = item["label"]
-    return id_to_label_map
+        name_to_label_map[item["name"]] = item["label"]
+    return name_to_label_map
 
 def sync_deals(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
@@ -691,10 +694,11 @@ def sync_deals(STATE, ctx):
                     for breadcrumb, mdata_map in mdata.items()
                     if breadcrumb
                     and (mdata_map.get('selected') == True or has_selected_properties)
-                    and any(prefix in breadcrumb[1] for prefix in V3_PREFIXES)]
+                    and any(prefix in breadcrumb[1] for prefix in V3_LABEL_PREFIXES)]
 
     url = get_url('deals_all')
-    properties_id_to_label_map = get_properties_id_to_label_map("deals")
+    properties_name_to_label_map = get_properties_name_to_label_map("deals")
+    properties_name_to_label_map.update(get_properties_name_to_label_map("deals_v3"))
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in gen_request(STATE, 'deals', url, params, 'deals', "hasMore", ["offset"], ["offset"], v3_fields=v3_fields):
             row_properties = row['properties']
@@ -712,7 +716,7 @@ def sync_deals(STATE, ctx):
 
             if not modified_time or modified_time >= start:
                 for k, v in row["properties"].items():
-                    label = properties_id_to_label_map.get(k, None)
+                    label = properties_name_to_label_map.get(k, None)
                     if label:
                         row[label] = v["value"]
                     else:
@@ -742,7 +746,8 @@ def sync_campaigns(STATE, ctx):
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in gen_request(STATE, 'campaigns', url, params, "campaigns", "hasMore", ["offset"], ["offset"]):
             record = request(get_url("campaigns_detail", campaign_id=row['id'])).json()
-            record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
+            # no need for lifting, need to verify
+            # record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)record = bumble_bee.transform(record, schema, mdata)
             singer.write_record("campaigns", record, catalog.get('stream_alias'), time_extracted=utils.now())
 
     return STATE
@@ -868,7 +873,9 @@ def sync_forms(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data:
-            record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            # no need for lifting, need to verify
+            # record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            record = bumble_bee.transform(row, schema, mdata)
 
             if record[bookmark_key] >= start:
                 singer.write_record("forms", record, catalog.get('stream_alias'), time_extracted=time_extracted)
@@ -899,7 +906,9 @@ def sync_workflows(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data['workflows']:
-            record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            #  no need for lifting, need to verify
+            # record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            record = bumble_bee.transform(row, schema, mdata)
             if record[bookmark_key] >= start:
                 singer.write_record("workflows", record, catalog.get('stream_alias'), time_extracted=time_extracted)
             if record[bookmark_key] >= max_bk_value:
@@ -930,7 +939,8 @@ def sync_owners(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data:
-            record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            # record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            record = bumble_bee.transform(row, schema, mdata)
             if record[bookmark_key] >= max_bk_value:
                 max_bk_value = record[bookmark_key]
 
@@ -974,7 +984,8 @@ def sync_engagements(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for engagement in engagements:
-            record = bumble_bee.transform(lift_properties_and_versions(engagement), schema, mdata)
+            # record = bumble_bee.transform(lift_properties_and_versions(engagement), schema, mdata)
+            record = bumble_bee.transform(engagement, schema, mdata)
             if record['engagement'][bookmark_key] >= start:
                 # hoist PK and bookmark field to top-level record
                 record['engagement_id'] = record['engagement']['id']
@@ -1069,7 +1080,7 @@ STREAMS = [
     Stream('campaigns', sync_campaigns, ["id"], None, 'FULL_TABLE'),
     Stream('contact_lists', sync_contact_lists, ["listId"], 'updatedAt', 'FULL_TABLE'),
     Stream('contacts', sync_contacts, ["vid"], 'versionTimestamp', 'FULL_TABLE'),
-    Stream('companies', sync_companies, ["companyId"], 'hs_lastmodifieddate', 'FULL_TABLE'),
+    Stream('companies', sync_companies, ["companyId"], 'Last Modified Date', 'FULL_TABLE'),
     Stream('deals', sync_deals, ["dealId"], 'Last Modified Date', 'FULL_TABLE'),
     Stream('deal_pipelines', sync_deal_pipelines, ['pipelineId'], None, 'FULL_TABLE'),
     Stream('engagements', sync_engagements, ["engagement_id"], 'lastUpdated', 'FULL_TABLE')
@@ -1189,7 +1200,6 @@ def load_discovered_schema(stream):
 def discover_schemas():
     result = {'streams': []}
     for stream in STREAMS:
-
         LOGGER.info('Loading schema for %s', stream.tap_stream_id)
         schema, mdata = load_discovered_schema(stream)
         result['streams'].append({'stream': stream.tap_stream_id,
