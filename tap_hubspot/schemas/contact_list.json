@@ -49,13 +49,6 @@
         "string"
       ]
     },
-    "associated-company": {
-      "type": [
-        "null",
-        "object"
-      ],
-      "properties": {}
-    },
     "identity-profiles": {
       "type": [
         "null",
@@ -364,35 +357,65 @@
         }
       }
     },
-    "First Name": {
-      "type": [
-        "null",
-        "string"
-      ]
-    },
-    "Last Modified Date": {
-      "type": [
-        "null",
-        "string"
-      ]
-    },
-    "Company Name": {
-      "type": [
-        "null",
-        "string"
-      ]
-    },
-    "Last Name": {
-      "type": [
-        "null",
-        "string"
-      ]
-    },
-    "Email": {
-      "type": [
-        "null",
-        "string"
-      ]
+    "properties": {
+      "type": "object",
+      "properties": {
+        "firstname": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "lastmodifieddate": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "company": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "lastname": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "email": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        }
+      }
     }
   }
 }

@@ -44,7 +44,6 @@ CONTACTS_BY_COMPANY = "contacts_by_company"
 
 DEFAULT_CHUNK_SIZE = 1000 * 60 * 60 * 24
 
-V3_LABEL_PREFIXES = {'Date entered', 'Date exited', 'Time in'}
 V3_PREFIXES = {'hs_date_entered', 'hs_date_exited', 'hs_time_in'}
 
 CONFIG = {
@@ -167,24 +166,19 @@ def get_field_schema(field_type, extras=False):
             }
         }
 
-def parse_custom_schema(data, use_label):
-    if use_label:
-        return {
-        field['label']: get_field_type_schema(field['type'])
-        for field in data
-    }
+def parse_custom_schema(data):
     return {
         field['name']: get_field_type_schema(field['type'])
         for field in data
     }
 
 
-def get_custom_schema(entity_name, use_label=True):
-    return parse_custom_schema(request(get_url(entity_name + "_properties")).json(), use_label)
+def get_custom_schema(entity_name):
+    return parse_custom_schema(request(get_url(entity_name + "_properties")).json())
 
-def get_v3_schema(use_label=True):
+def get_v3_schema():
     url = get_url("deals_v3_properties")
-    return parse_custom_schema(request(url).json()['results'], use_label)
+    return parse_custom_schema(request(url).json()['results'])
 
 def get_abs_path(path):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), path)
@@ -205,7 +199,7 @@ def load_schema(entity_name):
         if entity_name in ["deals"]:
             v3_schema = get_v3_schema()
             for key, value in v3_schema.items():
-                if any(prefix in key for prefix in V3_LABEL_PREFIXES):
+                if any(prefix in key for prefix in V3_PREFIXES):
                     custom_schema[key] = value
             
             del schema['properties']['associations']
@@ -560,7 +554,7 @@ def sync_companies(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
     mdata = metadata.to_map(catalog.get('metadata'))
     bumble_bee = Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING)
-    bookmark_key = 'Last Modified Date'
+    bookmark_key = 'hs_lastmodifieddate'
     start = utils.strptime_to_utc(get_start(STATE, "companies", bookmark_key))
     LOGGER.info("sync_companies from %s", start)
     schema = load_schema('companies')
@@ -581,8 +575,6 @@ def sync_companies(STATE, ctx):
     if CONTACTS_BY_COMPANY in ctx.selected_stream_ids:
         contacts_by_company_schema = load_schema(CONTACTS_BY_COMPANY)
         singer.write_schema("contacts_by_company", contacts_by_company_schema, ["company-id", "contact-id"])
-    
-    properties_name_to_label_map = get_properties_name_to_label_map("companies")
 
     with bumble_bee:
         for row in gen_request(STATE, 'companies', url, default_company_params, 'companies', 'has-more', ['offset'], ['offset']):
@@ -602,9 +594,8 @@ def sync_companies(STATE, ctx):
 
             if not modified_time or modified_time >= start:
                 record = request(get_url("companies_detail", company_id=row['companyId'])).json()
-                record = update_field_name_to_label(record, properties_name_to_label_map)
 
-                record = bumble_bee.transform(record, schema, mdata)
+                record = bumble_bee.transform(lift_properties(record), schema, mdata)
                 singer.write_record("companies", record, catalog.get('stream_alias'), time_extracted=utils.now())
                 if CONTACTS_BY_COMPANY in ctx.selected_stream_ids:
                     STATE = _sync_contacts_by_company(STATE, ctx, record['companyId'])
@@ -623,32 +614,17 @@ def has_selected_custom_field(mdata):
             return True
     return False
 
-#TODO for POC
-def get_properties_name_to_label_map(entity_name):
-    data = request(get_url(entity_name + "_properties")).json()
-    if entity_name == "deals_v3":
-        data = data["results"]
-    name_to_label_map = {}
-    for item in data:
-        name_to_label_map[item["name"]] = item["label"]
-    return name_to_label_map
-
-def update_field_name_to_label(data, map):
-    for k, v in data['properties'].items():
-        label = map.get(k, None)
-        if label:
-            data[label] = v["value"]
-        else:
-            data[k] = v["value"]
+def lift_properties(data):
+    for k,v in data.get("properties", {}).items():
+        data[k] = v["value"]
     
     del data['properties']
-    
     return data
 
 def sync_deals(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
     mdata = metadata.to_map(catalog.get('metadata'))
-    bookmark_key = 'Last Modified Date'
+    bookmark_key = 'hs_lastmodifieddate'
     start = utils.strptime_with_tz(get_start(STATE, "deals", bookmark_key))
     max_bk_value = start
     LOGGER.info("sync_deals from %s", start)
@@ -685,11 +661,9 @@ def sync_deals(STATE, ctx):
                     for breadcrumb, mdata_map in mdata.items()
                     if breadcrumb
                     and (mdata_map.get('selected') == True or has_selected_properties)
-                    and any(prefix in breadcrumb[1] for prefix in V3_LABEL_PREFIXES)]
+                    and any(prefix in breadcrumb[1] for prefix in V3_PREFIXES)]
 
     url = get_url('deals_all')
-    properties_name_to_label_map = get_properties_name_to_label_map("deals")
-    properties_name_to_label_map.update(get_properties_name_to_label_map("deals_v3"))
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in gen_request(STATE, 'deals', url, params, 'deals', "hasMore", ["offset"], ["offset"], v3_fields=v3_fields):
             row_properties = row['properties']
@@ -706,9 +680,7 @@ def sync_deals(STATE, ctx):
                 max_bk_value = modified_time
 
             if not modified_time or modified_time >= start:
-                row = update_field_name_to_label(row, properties_name_to_label_map)
-
-                record = bumble_bee.transform(row, schema, mdata)
+                record = bumble_bee.transform(lift_properties(row), schema, mdata)
                 singer.write_record("deals", record, catalog.get('stream_alias'), time_extracted=utils.now())
             else:
                 LOGGER.info(f'Skipping row as modified time is less than start_time')
@@ -1057,8 +1029,8 @@ STREAMS = [
     Stream('campaigns', sync_campaigns, ["id"], None, 'FULL_TABLE'),
     Stream('contact_lists', sync_contact_lists, ["listId"], 'updatedAt', 'FULL_TABLE'),
     Stream('contacts', sync_contacts, ["vid"], 'versionTimestamp', 'FULL_TABLE'),
-    Stream('companies', sync_companies, ["companyId"], 'Last Modified Date', 'FULL_TABLE'),
-    Stream('deals', sync_deals, ["dealId"], 'Last Modified Date', 'FULL_TABLE'),
+    Stream('companies', sync_companies, ["companyId"], 'hs_lastmodifieddate', 'FULL_TABLE'),
+    Stream('deals', sync_deals, ["dealId"], 'hs_lastmodifieddate', 'FULL_TABLE'),
     Stream('deal_pipelines', sync_deal_pipelines, ['pipelineId'], None, 'FULL_TABLE'),
     Stream('engagements', sync_engagements, ["engagement_id"], 'lastUpdated', 'FULL_TABLE')
 ]
