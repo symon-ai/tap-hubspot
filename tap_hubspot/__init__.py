@@ -166,19 +166,19 @@ def get_field_schema(field_type, extras=False):
             }
         }
 
-def parse_custom_schema(entity_name, data):
+def parse_custom_schema(data):
     return {
-        field['name']: get_field_schema(field['type'], entity_name != 'contacts')
+        field['name']: get_field_type_schema(field['type'])
         for field in data
     }
 
 
 def get_custom_schema(entity_name):
-    return parse_custom_schema(entity_name, request(get_url(entity_name + "_properties")).json())
+    return parse_custom_schema(request(get_url(entity_name + "_properties")).json())
 
-def get_v3_schema(entity_name):
+def get_v3_schema():
     url = get_url("deals_v3_properties")
-    return parse_custom_schema(entity_name, request(url).json()['results'])
+    return parse_custom_schema(request(url).json()['results'])
 
 def get_abs_path(path):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), path)
@@ -196,27 +196,24 @@ def load_schema(entity_name):
     if entity_name in ["contacts", "companies", "deals"]:
         custom_schema = get_custom_schema(entity_name)
 
-        schema['properties']['properties'] = {
-            "type": "object",
-            "properties": custom_schema,
-        }
-
         if entity_name in ["deals"]:
-            v3_schema = get_v3_schema(entity_name)
+            v3_schema = get_v3_schema()
             for key, value in v3_schema.items():
                 if any(prefix in key for prefix in V3_PREFIXES):
                     custom_schema[key] = value
+            
+            del schema['properties']['associations']
+        
+        schema['properties'].update(custom_schema)
 
-        # Move properties to top level
-        custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
-        schema['properties'].update(custom_schema_top_level)
+        # For Symon imports, excluding properties_versions
+        # # Make properties_versions selectable and share the same schema.
+        # versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
+        # schema['properties']['properties_versions'] = versions_schema
 
-        # Make properties_versions selectable and share the same schema.
-        versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
-        schema['properties']['properties_versions'] = versions_schema
-
-    if entity_name == "contacts":
-        schema['properties']['associated-company'] = load_associated_company_schema()
+    # For Symon imports, excluding associated-company in contacts table
+    # if entity_name == "contacts":
+    #     schema['properties']['associated-company'] = load_associated_company_schema()
 
     return schema
 
@@ -450,7 +447,7 @@ def _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_name = "contact
     mdata = metadata.to_map(catalog.get('metadata'))
 
     for record in data.values():
-        record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
+        record = bumble_bee.transform(lift_properties(record), schema, mdata)
         singer.write_record(stream_name, record, catalog.get('stream_alias'), time_extracted=time_extracted)
 
 default_contact_params = {
@@ -579,7 +576,8 @@ def sync_companies(STATE, ctx):
 
             if not modified_time or modified_time >= start:
                 record = request(get_url("companies_detail", company_id=row['companyId'])).json()
-                record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
+
+                record = bumble_bee.transform(lift_properties(record), schema, mdata)
                 singer.write_record("companies", record, catalog.get('stream_alias'), time_extracted=utils.now())
                 if CONTACTS_BY_COMPANY in ctx.selected_stream_ids:
                     STATE = _sync_contacts_by_company(STATE, ctx, record['companyId'])
@@ -597,6 +595,13 @@ def has_selected_custom_field(mdata):
         if mdata.get(prop, {}).get('selected') == True:
             return True
     return False
+
+def lift_properties(data):
+    for k,v in data.get("properties", {}).items():
+        data[k] = v["value"]
+    
+    del data['properties']
+    return data
 
 def sync_deals(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
@@ -622,21 +627,23 @@ def sync_deals(STATE, ctx):
 
     v3_fields = None
     has_selected_properties = mdata.get(('properties', 'properties'), {}).get('selected')
-    if has_selected_properties or has_selected_custom_field(mdata):
-        # On 2/12/20, hubspot added a lot of additional properties for
-        # deals, and appending all of them to requests ended up leading to
-        # 414 (url-too-long) errors. Hubspot recommended we use the
-        # `includeAllProperties` and `allpropertiesFetchMode` params
-        # instead.
-        params['includeAllProperties'] = True
-        params['allPropertiesFetchMode'] = 'latest_version'
+    # commented out below so that we have all the propeties
+    # if has_selected_properties or has_selected_custom_field(mdata):
+    
+    # On 2/12/20, hubspot added a lot of additional properties for
+    # deals, and appending all of them to requests ended up leading to
+    # 414 (url-too-long) errors. Hubspot recommended we use the
+    # `includeAllProperties` and `allpropertiesFetchMode` params
+    # instead.
+    params['includeAllProperties'] = True
+    params['allPropertiesFetchMode'] = 'latest_version'
 
-        # Grab selected `hs_date_entered/exited` fields to call the v3 endpoint with
-        v3_fields = [breadcrumb[1].replace('property_', '')
-                     for breadcrumb, mdata_map in mdata.items()
-                     if breadcrumb
-                     and (mdata_map.get('selected') == True or has_selected_properties)
-                     and any(prefix in breadcrumb[1] for prefix in V3_PREFIXES)]
+    # Grab selected `hs_date_entered/exited` fields to call the v3 endpoint with
+    v3_fields = [breadcrumb[1].replace('property_', '')
+                    for breadcrumb, mdata_map in mdata.items()
+                    if breadcrumb
+                    and (mdata_map.get('selected') == True or has_selected_properties)
+                    and any(prefix in breadcrumb[1] for prefix in V3_PREFIXES)]
 
     url = get_url('deals_all')
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
@@ -655,8 +662,10 @@ def sync_deals(STATE, ctx):
                 max_bk_value = modified_time
 
             if not modified_time or modified_time >= start:
-                record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+                record = bumble_bee.transform(lift_properties(row), schema, mdata)
                 singer.write_record("deals", record, catalog.get('stream_alias'), time_extracted=utils.now())
+            else:
+                LOGGER.info(f'Skipping row as modified time is less than start_time')
 
     STATE = singer.write_bookmark(STATE, 'deals', bookmark_key, utils.strftime(max_bk_value))
     singer.write_state(STATE)
@@ -675,7 +684,7 @@ def sync_campaigns(STATE, ctx):
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in gen_request(STATE, 'campaigns', url, params, "campaigns", "hasMore", ["offset"], ["offset"]):
             record = request(get_url("campaigns_detail", campaign_id=row['id'])).json()
-            record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
+            record = bumble_bee.transform(record, schema, mdata)
             singer.write_record("campaigns", record, catalog.get('stream_alias'), time_extracted=utils.now())
 
     return STATE
@@ -725,7 +734,7 @@ def sync_entity_chunked(STATE, catalog, entity_name, key_properties, path):
 
                     for row in data[path]:
                         counter.increment()
-                        record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+                        record = bumble_bee.transform(row, schema, mdata)
                         singer.write_record(entity_name,
                                             record,
                                             catalog.get('stream_alias'),
@@ -772,7 +781,7 @@ def sync_contact_lists(STATE, ctx):
     params = {'count': 250}
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in gen_request(STATE, 'contact_lists', url, params, "lists", "has-more", ["offset"], ["offset"]):
-            record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            record = bumble_bee.transform(row, schema, mdata)
 
             if record[bookmark_key] >= start:
                 singer.write_record("contact_lists", record, catalog.get('stream_alias'), time_extracted=utils.now())
@@ -801,7 +810,7 @@ def sync_forms(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data:
-            record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            record = bumble_bee.transform(row, schema, mdata)
 
             if record[bookmark_key] >= start:
                 singer.write_record("forms", record, catalog.get('stream_alias'), time_extracted=time_extracted)
@@ -832,7 +841,7 @@ def sync_workflows(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data['workflows']:
-            record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            record = bumble_bee.transform(row, schema, mdata)
             if record[bookmark_key] >= start:
                 singer.write_record("workflows", record, catalog.get('stream_alias'), time_extracted=time_extracted)
             if record[bookmark_key] >= max_bk_value:
@@ -863,7 +872,7 @@ def sync_owners(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data:
-            record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            record = bumble_bee.transform(row, schema, mdata)
             if record[bookmark_key] >= max_bk_value:
                 max_bk_value = record[bookmark_key]
 
@@ -907,7 +916,7 @@ def sync_engagements(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for engagement in engagements:
-            record = bumble_bee.transform(lift_properties_and_versions(engagement), schema, mdata)
+            record = bumble_bee.transform(engagement, schema, mdata)
             if record['engagement'][bookmark_key] >= start:
                 # hoist PK and bookmark field to top-level record
                 record['engagement_id'] = record['engagement']['id']
@@ -932,7 +941,7 @@ def sync_deal_pipelines(STATE, ctx):
     data = request(get_url('deal_pipelines')).json()
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data:
-            record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+            record = bumble_bee.transform(row, schema, mdata)
             singer.write_record("deal_pipelines", record, catalog.get('stream_alias'), time_extracted=utils.now())
     singer.write_state(STATE)
     return STATE
