@@ -215,17 +215,17 @@ def load_schema(entity_name):
         # original code processes below code without if statement. added entity_name check for deals as we are treating it differently for POC
         # Need to change code later when fix other tables 
         # elif entity_name not in ["deals", "companies"]:
-        #     # schema['properties']['properties'] = {
-        #     #     "type": "object",
-        #     #     "properties": custom_schema,
-        #     # }
-        #     # Move properties to top level
-        #     custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
-        #     schema['properties'].update(custom_schema_top_level)
+            # schema['properties']['properties'] = {
+            #    "type": "object",
+            #     "properties": custom_schema,
+            # }
+            # Move properties to top level
+            # custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
+            # schema['properties'].update(custom_schema_top_level)
 
-        #     # Make properties_versions selectable and share the same schema.
-        #     versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
-        #     schema['properties']['properties_versions'] = versions_schema
+            # Make properties_versions selectable and share the same schema.
+            # versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
+            # schema['properties']['properties_versions'] = versions_schema
 
     if entity_name == "contacts":
         schema['properties']['associated-company'] = load_associated_company_schema()
@@ -708,7 +708,6 @@ def sync_deals(STATE, ctx):
             if not modified_time or modified_time >= start:
                 row = update_field_name_to_label(row, properties_name_to_label_map)
 
-                # record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
                 record = bumble_bee.transform(row, schema, mdata)
                 singer.write_record("deals", record, catalog.get('stream_alias'), time_extracted=utils.now())
             else:
@@ -731,8 +730,7 @@ def sync_campaigns(STATE, ctx):
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in gen_request(STATE, 'campaigns', url, params, "campaigns", "hasMore", ["offset"], ["offset"]):
             record = request(get_url("campaigns_detail", campaign_id=row['id'])).json()
-            # no need for lifting, need to verify
-            # record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)record = bumble_bee.transform(record, schema, mdata)
+            record = bumble_bee.transform(record, schema, mdata)
             singer.write_record("campaigns", record, catalog.get('stream_alias'), time_extracted=utils.now())
 
     return STATE
@@ -858,8 +856,6 @@ def sync_forms(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data:
-            # no need for lifting, need to verify
-            # record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
             record = bumble_bee.transform(row, schema, mdata)
 
             if record[bookmark_key] >= start:
@@ -891,8 +887,6 @@ def sync_workflows(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data['workflows']:
-            #  no need for lifting, need to verify
-            # record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
             record = bumble_bee.transform(row, schema, mdata)
             if record[bookmark_key] >= start:
                 singer.write_record("workflows", record, catalog.get('stream_alias'), time_extracted=time_extracted)
@@ -924,7 +918,6 @@ def sync_owners(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data:
-            # record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
             record = bumble_bee.transform(row, schema, mdata)
             if record[bookmark_key] >= max_bk_value:
                 max_bk_value = record[bookmark_key]
@@ -969,7 +962,6 @@ def sync_engagements(STATE, ctx):
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for engagement in engagements:
-            # record = bumble_bee.transform(lift_properties_and_versions(engagement), schema, mdata)
             record = bumble_bee.transform(engagement, schema, mdata)
             if record['engagement'][bookmark_key] >= start:
                 # hoist PK and bookmark field to top-level record
