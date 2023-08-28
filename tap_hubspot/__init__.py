@@ -206,23 +206,14 @@ def load_schema(entity_name):
         
         schema['properties'].update(custom_schema)
 
-        # original code processes below code without if statement. added entity_name check for deals as we are treating it differently for POC
-        # Need to change code later when fix other tables 
-        # elif entity_name not in ["deals", "companies"]:
-            # schema['properties']['properties'] = {
-            #    "type": "object",
-            #     "properties": custom_schema,
-            # }
-            # Move properties to top level
-            # custom_schema_top_level = {'property_{}'.format(k): v for k, v in custom_schema.items()}
-            # schema['properties'].update(custom_schema_top_level)
+        # For Symon imports, excluding properties_versions
+        # # Make properties_versions selectable and share the same schema.
+        # versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
+        # schema['properties']['properties_versions'] = versions_schema
 
-            # Make properties_versions selectable and share the same schema.
-            # versions_schema = utils.load_json(get_abs_path('schemas/versions.json'))
-            # schema['properties']['properties_versions'] = versions_schema
-
-    if entity_name == "contacts":
-        schema['properties']['associated-company'] = load_associated_company_schema()
+    # For Symon imports, excluding associated-company in contacts table
+    # if entity_name == "contacts":
+    #     schema['properties']['associated-company'] = load_associated_company_schema()
 
     return schema
 
@@ -450,22 +441,13 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
 def _sync_contact_vids(catalog, vids, schema, bumble_bee, stream_name = "contacts"):
     if len(vids) == 0:
         return
-    
-    contacts_properties_name_label_map = get_properties_name_to_label_map('contacts')
-    companies_properties_name_label_map = get_properties_name_to_label_map('companies')
-    
 
     data = request(get_url("contacts_detail"), params={'vid': vids, 'showListMemberships' : True, "formSubmissionMode" : "all"}).json()
     time_extracted = utils.now()
     mdata = metadata.to_map(catalog.get('metadata'))
 
     for record in data.values():
-        record = update_field_name_to_label(record, contacts_properties_name_label_map)
-
-        if 'associated-company' in record:
-            record['associated-company'] = update_field_name_to_label(record['associated-company'], companies_properties_name_label_map)
-
-        record = bumble_bee.transform(record, schema, mdata)
+        record = bumble_bee.transform(lift_properties(record), schema, mdata)
         singer.write_record(stream_name, record, catalog.get('stream_alias'), time_extracted=time_extracted)
 
 default_contact_params = {
