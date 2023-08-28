@@ -377,7 +377,7 @@ def process_v3_deals_records(v3_data):
     for record in v3_data:
         new_properties = {field_name : {'value': field_value}
                           for field_name, field_value in record['properties'].items()
-                          if any(prefix in field_name for prefix in V3_LABEL_PREFIXES)}
+                          if any(prefix in field_name for prefix in V3_PREFIXES)}
         transformed_v3_data.append({**record, 'properties' : new_properties})
     return transformed_v3_data
 
