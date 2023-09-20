@@ -1155,7 +1155,7 @@ def discover_contact_list_streams():
         stream = Stream(stream_id, sync_contact_list_contacts, ["vid"], 'versionTimestamp', 'FULL_TABLE')
         STREAMS.append(stream)
 
-def main_impl():
+def main():
     try:
         # used for storing error info to write if error occurs
         error_info = None
@@ -1209,9 +1209,6 @@ def main_impl():
             error_start_marker = args.config.get('error_start_marker', '[tap_error_start]')
             error_end_marker = args.config.get('error_end_marker', '[tap_error_end]')
             LOGGER.info(f'{error_start_marker}{error_info_json}{error_end_marker}')
-
-def main():
-    main_impl()
 
 if __name__ == '__main__':
     main()
