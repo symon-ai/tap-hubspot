@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import json
+import traceback
 
 import attr
 import backoff
@@ -18,12 +19,10 @@ from singer import utils
 from singer import (transform,
                     UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING,
                     Transformer, _transform_datetime)
+from tap_hubspot.symon_exception import SymonException
 
 LOGGER = singer.get_logger()
 SESSION = requests.Session()
-
-class InvalidAuthException(Exception):
-    pass
 
 class SourceUnavailableException(Exception):
     pass
@@ -230,7 +229,7 @@ def acquire_access_token_from_refresh_token():
 
     resp = requests.post(BASE_URL + "/oauth/v1/token", data=payload)
     if resp.status_code == 403:
-        raise InvalidAuthException(resp.content)
+        raise SymonException(f'Failed to connect to Hubspot, please ensure the oauth token is update to date.', 'hubspot.AuthInvalid')
 
     resp.raise_for_status()
     auth = resp.json()
@@ -254,8 +253,8 @@ def on_giveup(details):
         url = details['args']
         params = {}
 
-    raise Exception("Giving up on request after {} tries with url {} and params {}" \
-                    .format(details['tries'], url, params))
+    raise SymonException("Giving up on request after {} tries with url {} and params {}" \
+                    .format(details['tries'], url, params), 'hubspot.HubspotApiError')
 
 URL_SOURCE_RE = re.compile(BASE_URL + r'/(\w+)/')
 
@@ -306,7 +305,7 @@ def request(url, params=None):
         resp = SESSION.send(req)
         timer.tags[metrics.Tag.http_status_code] = resp.status_code
         if resp.status_code == 403:
-            raise SourceUnavailableException(resp.content)
+            raise SymonException("Import failed with the following Hubspot error: " + resp.content, 'hubspot.HubspotApiError')
         else:
             resp.raise_for_status()
 
@@ -393,6 +392,7 @@ def get_v3_deals(v3_fields, v1_data):
 
 #pylint: disable=line-too-long
 def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, offset_targets, v3_fields=None):
+    # all our sync cases provide the same offset_keys and offset_targets, no need to check the valueError here
     if len(offset_keys) != len(offset_targets):
         raise ValueError("Number of offset_keys must match number of offset_targets")
 
@@ -404,7 +404,7 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
             data = request(url, params).json()
 
             if data.get(path) is None:
-                raise RuntimeError("Unexpected API response: {} not in {}".format(path, data.keys()))
+                raise SymonException("Import failed with the following Hubstpot error: {} not in {}".format(path, data.keys()), 'hubspot.HubspotApiError')
 
             if v3_fields:
                 v3_data = get_v3_deals(v3_fields, data[path])
@@ -517,7 +517,7 @@ def _sync_contacts_by_company(STATE, ctx, company_id):
             data = request(url, default_contacts_by_company_params).json()
 
             if data.get(path) is None:
-                raise RuntimeError("Unexpected API response: {} not in {}".format(path, data.keys()))
+                raise SymonException("Import failed with the following Hubspot error: {} not in {}".format(path, data.keys()), 'hubspot.HubspotApiError')
 
             for row in data[path]:
                 counter.increment()
@@ -730,7 +730,7 @@ def sync_entity_chunked(STATE, catalog, entity_name, key_properties, path):
                     time_extracted = utils.now()
 
                     if data.get(path) is None:
-                        raise RuntimeError("Unexpected API response: {} not in {}".format(path, data.keys()))
+                        raise SymonException("Import failed with the following Hubspot error: {} not in {}".format(path, data.keys()), 'hubspot.HubspotApiError')
 
                     for row in data[path]:
                         counter.increment()
@@ -1155,33 +1155,60 @@ def discover_contact_list_streams():
         stream = Stream(stream_id, sync_contact_list_contacts, ["vid"], 'versionTimestamp', 'FULL_TABLE')
         STREAMS.append(stream)
 
-def main_impl():
-    args = utils.parse_args(
-        ["redirect_uri",
-         "client_id",
-         "client_secret",
-         "refresh_token",
-         "start_date"])
-
-    CONFIG.update(args.config)
-    STATE = {}
-
-    if args.state:
-        STATE.update(args.state)
-
-    if args.discover:
-        do_discover()
-    elif args.properties:
-        do_sync(STATE, args.properties)
-    else:
-        LOGGER.info("No properties were selected")
-
 def main():
     try:
-        main_impl()
-    except Exception as exc:
-        LOGGER.critical(exc)
-        raise exc
+        # used for storing error info to write if error occurs
+        error_info = None
+
+        args = utils.parse_args(
+            ["redirect_uri",
+            "client_id",
+            "client_secret",
+            "refresh_token",
+            "start_date"])
+
+        CONFIG.update(args.config)
+        STATE = {}
+
+        if args.state:
+            STATE.update(args.state)
+
+        if args.discover:
+            do_discover()
+        elif args.properties:
+            do_sync(STATE, args.properties)
+        else:
+            LOGGER.info("No properties were selected")
+    except SymonException as e:
+        error_info = {
+            'message': str(e),
+            'code': e.code,
+            'traceback': traceback.format_exc()
+        }
+
+        if e.details is not None:
+            error_info['details'] = e.details
+        raise
+    except BaseException as e:
+        error_info = {
+            'message': str(e),
+            'traceback': traceback.format_exc()
+        }
+        raise
+    finally:
+        if error_info is not None:
+            error_file_path = args.config.get('error_file_path', None)
+            if error_file_path is not None:
+                try:
+                    with open(error_file_path, 'w', encoding='utf-8') as fp:
+                        json.dump(error_info, fp)
+                except:
+                    pass
+            # log error info as well in case file is corrupted
+            error_info_json = json.dumps(error_info)
+            error_start_marker = args.config.get('error_start_marker', '[tap_error_start]')
+            error_end_marker = args.config.get('error_end_marker', '[tap_error_end]')
+            LOGGER.info(f'{error_start_marker}{error_info_json}{error_end_marker}')
 
 if __name__ == '__main__':
     main()
