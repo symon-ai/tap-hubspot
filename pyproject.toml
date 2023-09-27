@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tap-hubspot"
-version = "2.9.11"
+version = "2.9.12"
 description = "Singer.io tap for extracting data from the HubSpot API"
 authors = ["Stitch"]
 classifiers = ["Programming Language :: Python :: 3 :: Only"]
