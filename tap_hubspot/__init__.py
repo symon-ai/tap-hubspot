@@ -305,7 +305,7 @@ def request(url, params=None):
         resp = SESSION.send(req)
         timer.tags[metrics.Tag.http_status_code] = resp.status_code
         if resp.status_code == 403:
-            raise SymonException("Import failed with the following Hubspot error: " + resp.content.decode("utf-8"), 'hubspot.HubspotApiError')
+            raise SymonException("Import failed with the following Hubspot error: " + str(resp.content), 'hubspot.HubspotApiError')
         else:
             resp.raise_for_status()
 
