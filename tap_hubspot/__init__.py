@@ -233,7 +233,7 @@ def acquire_access_token_from_refresh_token():
         resp.raise_for_status()
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code == 400:
-            raise SymonException(f'Failed to connect to Hubspot, please ensure the oauth token is up to date.', 'hubspot.AuthInvalid')
+            raise SymonException(f'Failed to connect to Hubspot. Please ensure the OAuth token is up to date.', 'hubspot.AuthInvalid')
         
         if e.response is not None and e.response.text:
             raise SymonException(f'Import failed with the following Hubstpot error: {e.response.text}', 'hubspot.HubspotApiError')
