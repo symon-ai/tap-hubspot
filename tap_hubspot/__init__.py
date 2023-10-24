@@ -228,10 +228,18 @@ def acquire_access_token_from_refresh_token():
 
 
     resp = requests.post(BASE_URL + "/oauth/v1/token", data=payload)
-    if resp.status_code == 403:
-        raise SymonException(f'Failed to connect to Hubspot, please ensure the oauth token is update to date.', 'hubspot.AuthInvalid')
 
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 400:
+            raise SymonException(f'Failed to connect to Hubspot, please ensure the oauth token is up to date.', 'hubspot.AuthInvalid')
+        
+        if e.response is not None and e.response.text:
+            raise SymonException(f'Import failed with the following Hubstpot error: {e.response.text}', 'hubspot.HubspotApiError')
+        raise
+
+
     auth = resp.json()
     CONFIG['access_token'] = auth['access_token']
     CONFIG['refresh_token'] = auth['refresh_token']
@@ -304,10 +312,13 @@ def request(url, params=None):
     with metrics.http_request_timer(parse_source_from_url(url)) as timer:
         resp = SESSION.send(req)
         timer.tags[metrics.Tag.http_status_code] = resp.status_code
-        if resp.status_code == 403:
-            raise SymonException("Import failed with the following Hubspot error: " + str(resp.content), 'hubspot.HubspotApiError')
-        else:
+
+        try:
             resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.text:
+                raise SymonException(f'Import failed with the following Hubstpot error: {e.response.text}', 'hubspot.HubspotApiError')
+            raise
 
     return resp
 # {"bookmarks" : {"contacts" : { "lastmodifieddate" : "2001-01-01"
