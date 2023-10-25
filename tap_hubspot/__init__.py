@@ -241,7 +241,7 @@ def acquire_access_token_from_refresh_token():
             pass
 
         if message is not None:
-            raise SymonException(f'Import failed with the following Hubstpot error: (status code: {resp.status_code}) {message}', 'hubspot.HubspotApiError')
+            raise SymonException(f'Import failed with the following Hubstpot error: {message}', 'hubspot.HubspotApiError')
         raise
 
 
@@ -328,7 +328,7 @@ def request(url, params=None):
                 pass
 
             if message is not None:
-                raise SymonException(f'Import failed with the following Hubstpot error: (status code: {resp.status_code}) {message}', 'hubspot.HubspotApiError')
+                raise SymonException(f'Import failed with the following Hubstpot error: {message}', 'hubspot.HubspotApiError')
             raise
 
     return resp
@@ -383,7 +383,7 @@ def post_search_endpoint(url, data, params=None):
                 pass
 
             if message is not None:
-                raise SymonException(f'Import failed with the following Hubstpot error: (status code: {resp.status_code}) {message}', 'hubspot.HubspotApiError')
+                raise SymonException(f'Import failed with the following Hubstpot error: {message}', 'hubspot.HubspotApiError')
             raise
 
     return resp
