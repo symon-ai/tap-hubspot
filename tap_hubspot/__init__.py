@@ -228,15 +228,20 @@ def acquire_access_token_from_refresh_token():
 
 
     resp = requests.post(BASE_URL + "/oauth/v1/token", data=payload)
-
+    if resp.status_code == 400:
+        raise SymonException(f'Failed to connect to Hubspot. Please ensure the OAuth token is up to date.', 'hubspot.AuthInvalid')
+    
     try:
         resp.raise_for_status()
     except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 400:
-            raise SymonException(f'Failed to connect to Hubspot. Please ensure the OAuth token is up to date.', 'hubspot.AuthInvalid')
-        
-        if e.response is not None and e.response.text:
-            raise SymonException(f'Import failed with the following Hubstpot error: {e.response.text}', 'hubspot.HubspotApiError')
+        message = None
+        try:
+            message = resp.json()["message"]
+        except Exception:
+            pass
+
+        if message is not None:
+            raise SymonException(f'Import failed with the following Hubstpot error: {message}', 'hubspot.HubspotApiError')
         raise
 
 
@@ -316,8 +321,14 @@ def request(url, params=None):
         try:
             resp.raise_for_status()
         except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.text:
-                raise SymonException(f'Import failed with the following Hubstpot error: {e.response.text}', 'hubspot.HubspotApiError')
+            message = None
+            try:
+                message = resp.json()["message"]
+            except:
+                pass
+
+            if message is not None:
+                raise SymonException(f'Import failed with the following Hubstpot error: (status code: {resp.status_code}) {message}', 'hubspot.HubspotApiError')
             raise
 
     return resp
@@ -361,8 +372,19 @@ def post_search_endpoint(url, data, params=None):
             params=params,
             headers=headers
         )
+        
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            message = None
+            try:
+                message = resp.json()["message"]
+            except:
+                pass
 
-        resp.raise_for_status()
+            if message is not None:
+                raise SymonException(f'Import failed with the following Hubstpot error: (status code: {resp.status_code}) {message}', 'hubspot.HubspotApiError')
+            raise
 
     return resp
 
