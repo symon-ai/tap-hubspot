@@ -245,7 +245,7 @@ def acquire_access_token_from_refresh_token():
             pass
 
         if message is not None:
-            raise SymonException(f'Import failed with the following Hubstpot error: {message}', 'hubspot.HubspotApiError')
+            raise SymonException(f'Import failed with the following Hubspot error: {message}', 'hubspot.HubspotApiError')
         raise
 
 
@@ -332,7 +332,7 @@ def request(url, params=None):
                 pass
 
             if message is not None:
-                raise SymonException(f'Import failed with the following Hubstpot error: {message}', 'hubspot.HubspotApiError')
+                raise SymonException(f'Import failed with the following Hubspot error: {message}', 'hubspot.HubspotApiError')
             raise
 
     return resp
@@ -387,7 +387,7 @@ def post_search_endpoint(url, data, params=None):
                 pass
 
             if message is not None:
-                raise SymonException(f'Import failed with the following Hubstpot error: {message}', 'hubspot.HubspotApiError')
+                raise SymonException(f'Import failed with the following Hubspot error: {message}', 'hubspot.HubspotApiError')
             raise
 
     return resp
@@ -441,7 +441,7 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
             data = request(url, params).json()
 
             if data.get(path) is None:
-                raise SymonException("Import failed with the following Hubstpot error: {} not in {}".format(path, data.keys()), 'hubspot.HubspotApiError')
+                raise SymonException("Import failed with the following Hubspot error: {} not in {}".format(path, data.keys()), 'hubspot.HubspotApiError')
 
             if v3_fields:
                 v3_data = get_v3_deals(v3_fields, data[path])
