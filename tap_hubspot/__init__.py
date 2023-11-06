@@ -61,6 +61,10 @@ CONFIG = {
     "include_inactives": None,
 }
 
+# for symon error logging
+ERROR_START_MARKER = '[tap_error_start]'
+ERROR_END_MARKER = '[tap_error_end]'
+
 ENDPOINTS = {
     "contacts_properties":  "/properties/v1/contacts/properties",
     "contacts_all":         "/contacts/v1/lists/all/contacts/all",
@@ -228,10 +232,23 @@ def acquire_access_token_from_refresh_token():
 
 
     resp = requests.post(BASE_URL + "/oauth/v1/token", data=payload)
-    if resp.status_code == 403:
-        raise SymonException(f'Failed to connect to Hubspot, please ensure the oauth token is update to date.', 'hubspot.AuthInvalid')
+    if resp.status_code == 400:
+        raise SymonException(f'Failed to connect to Hubspot. Please ensure the OAuth token is up to date.', 'hubspot.AuthInvalid')
+    
+    try:
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        message = None
+        try:
+            message = resp.json()["message"]
+        except Exception:
+            pass
 
-    resp.raise_for_status()
+        if message is not None:
+            raise SymonException(f'Import failed with the following Hubspot error: {message}', 'hubspot.HubspotApiError')
+        raise
+
+
     auth = resp.json()
     CONFIG['access_token'] = auth['access_token']
     CONFIG['refresh_token'] = auth['refresh_token']
@@ -304,10 +321,19 @@ def request(url, params=None):
     with metrics.http_request_timer(parse_source_from_url(url)) as timer:
         resp = SESSION.send(req)
         timer.tags[metrics.Tag.http_status_code] = resp.status_code
-        if resp.status_code == 403:
-            raise SymonException("Import failed with the following Hubspot error: " + str(resp.content), 'hubspot.HubspotApiError')
-        else:
+
+        try:
             resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            message = None
+            try:
+                message = resp.json()["message"]
+            except:
+                pass
+
+            if message is not None:
+                raise SymonException(f'Import failed with the following Hubspot error: {message}', 'hubspot.HubspotApiError')
+            raise
 
     return resp
 # {"bookmarks" : {"contacts" : { "lastmodifieddate" : "2001-01-01"
@@ -350,8 +376,19 @@ def post_search_endpoint(url, data, params=None):
             params=params,
             headers=headers
         )
+        
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            message = None
+            try:
+                message = resp.json()["message"]
+            except:
+                pass
 
-        resp.raise_for_status()
+            if message is not None:
+                raise SymonException(f'Import failed with the following Hubspot error: {message}', 'hubspot.HubspotApiError')
+            raise
 
     return resp
 
@@ -404,7 +441,7 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
             data = request(url, params).json()
 
             if data.get(path) is None:
-                raise SymonException("Import failed with the following Hubstpot error: {} not in {}".format(path, data.keys()), 'hubspot.HubspotApiError')
+                raise SymonException("Import failed with the following Hubspot error: {} not in {}".format(path, data.keys()), 'hubspot.HubspotApiError')
 
             if v3_fields:
                 v3_data = get_v3_deals(v3_fields, data[path])
@@ -1180,35 +1217,42 @@ def main():
         else:
             LOGGER.info("No properties were selected")
     except SymonException as e:
+        exc_type, exc_value, exc_traceback = sys.exc_info()
         error_info = {
-            'message': str(e),
+            'message': traceback.format_exception_only(exc_type, exc_value)[-1],
             'code': e.code,
-            'traceback': traceback.format_exc()
+            'traceback': "".join(traceback.format_tb(exc_traceback))
         }
 
         if e.details is not None:
             error_info['details'] = e.details
         raise
     except BaseException as e:
+        exc_type, exc_value, exc_traceback = sys.exc_info()
         error_info = {
-            'message': str(e),
-            'traceback': traceback.format_exc()
+            'message': traceback.format_exception_only(exc_type, exc_value)[-1],
+            'traceback': "".join(traceback.format_tb(exc_traceback))
         }
         raise
     finally:
         if error_info is not None:
-            error_file_path = args.config.get('error_file_path', None)
-            if error_file_path is not None:
-                try:
-                    with open(error_file_path, 'w', encoding='utf-8') as fp:
-                        json.dump(error_info, fp)
-                except:
-                    pass
-            # log error info as well in case file is corrupted
-            error_info_json = json.dumps(error_info)
-            error_start_marker = args.config.get('error_start_marker', '[tap_error_start]')
-            error_end_marker = args.config.get('error_end_marker', '[tap_error_end]')
-            LOGGER.info(f'{error_start_marker}{error_info_json}{error_end_marker}')
+            try:
+                error_file_path = args.config.get('error_file_path', None)
+                if error_file_path is not None:
+                    try:
+                        with open(error_file_path, 'w', encoding='utf-8') as fp:
+                            json.dump(error_info, fp)
+                    except:
+                        pass
+                # log error info as well in case file is corrupted
+                error_info_json = json.dumps(error_info)
+                error_start_marker = args.config.get('error_start_marker', ERROR_START_MARKER)
+                error_end_marker = args.config.get('error_end_marker', ERROR_END_MARKER)
+                LOGGER.info(f'{error_start_marker}{error_info_json}{error_end_marker}')
+            except:
+                # error occurred before args was parsed correctly, log the error
+                error_info_json = json.dumps(error_info)
+                LOGGER.info(f'{ERROR_START_MARKER}{error_info_json}{ERROR_END_MARKER}')
 
 if __name__ == '__main__':
     main()
