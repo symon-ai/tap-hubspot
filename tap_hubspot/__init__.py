@@ -245,6 +245,9 @@ def acquire_access_token_from_refresh_token():
             pass
 
         if message is not None:
+            if 'You have reached your ten_secondly_rolling limit' in message:
+                raise SymonException(f'You have reached the ten_secondly_rolling limit from Hubspot. Try importing fewer tables in a single batch.', 'hubspot.HubspotApiError')
+            
             raise SymonException(f'Import failed with the following Hubspot error: {message}', 'hubspot.HubspotApiError')
         raise
 
@@ -332,6 +335,9 @@ def request(url, params=None):
                 pass
 
             if message is not None:
+                if 'You have reached your ten_secondly_rolling limit' in message:
+                    raise SymonException(f'You have reached the ten_secondly_rolling limit from Hubspot. Try importing fewer tables in a single batch.', 'hubspot.HubspotApiError')
+                
                 raise SymonException(f'Import failed with the following Hubspot error: {message}', 'hubspot.HubspotApiError')
             raise
 
@@ -387,6 +393,9 @@ def post_search_endpoint(url, data, params=None):
                 pass
 
             if message is not None:
+                if 'You have reached your ten_secondly_rolling limit' in message:
+                    raise SymonException(f'You have reached the ten_secondly_rolling limit from Hubspot. Try importing fewer tables in a single batch.', 'hubspot.HubspotApiError')
+            
                 raise SymonException(f'Import failed with the following Hubspot error: {message}', 'hubspot.HubspotApiError')
             raise
 
