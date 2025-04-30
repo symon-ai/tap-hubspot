@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.0.0
+   * Upgrade Owners API endpoint [#256](https://github.com/singer-io/tap-hubspot/pull/256)
+   
 ## 2.9.8
 
 - Add latest singer-io/tap-hubspot changes

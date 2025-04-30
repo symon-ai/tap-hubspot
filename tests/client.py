@@ -592,9 +592,9 @@ class TestClient():
         """
         Get all owners.
         """
-        url = f"{BASE_URL}/owners/v2/owners"
+        url = f"{BASE_URL}/crm/v3/owners"
         records = self.get(url)
-        transformed_records = self.datatype_transformations('owners', records)
+        transformed_records = self.datatype_transformations('owners', records['results'])
         return transformed_records
 
     def get_subscription_changes(self, since=''):

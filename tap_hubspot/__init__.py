@@ -99,7 +99,7 @@ ENDPOINTS = {
     "email_events":         "/email/public/v1/events",
     "forms":                "/forms/v2/forms",
     "workflows":            "/automation/v3/workflows",
-    "owners":               "/owners/v2/owners",
+    "owners":               "/crm/v3/owners/",
 }
 
 def get_start(state, tap_stream_id, bookmark_key):
@@ -1053,7 +1053,7 @@ STREAMS = [
     # Do these last as they are full table
     Stream('forms', sync_forms, ['guid'], 'updatedAt', 'FULL_TABLE'),
     Stream('workflows', sync_workflows, ['id'], 'updatedAt', 'FULL_TABLE'),
-    Stream('owners', sync_owners, ["ownerId"], 'updatedAt', 'FULL_TABLE'),
+    Stream('owners', sync_owners, ["id"], 'updatedAt', 'INCREMENTAL'),
     Stream('campaigns', sync_campaigns, ["id"], None, 'FULL_TABLE'),
     Stream('contact_lists', sync_contact_lists, ["listId"], 'updatedAt', 'FULL_TABLE'),
     Stream('contacts', sync_contacts, ["vid"], 'versionTimestamp', 'FULL_TABLE'),
