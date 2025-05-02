@@ -1020,6 +1020,7 @@ def get_v3_records(tap_stream_id, url, params, path, more_key):
     """
     with metrics.record_counter(tap_stream_id) as counter:
         while True:
+            LOGGER.info("URL %s", url)
             data = request(url, params).json()
 
             if data.get(path) is None:
@@ -1032,6 +1033,7 @@ def get_v3_records(tap_stream_id, url, params, path, more_key):
 
             if not data.get(more_key):
                 break
+            
             params['after'] = data.get(more_key).get('next').get('after')
 
 
