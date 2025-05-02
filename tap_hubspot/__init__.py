@@ -1050,7 +1050,7 @@ def sync_v3_stream(STATE, ctx, stream_id, params, primary_key="id", bookmark_key
     schema = load_schema(stream_id)
     singer.write_schema(stream_id, schema, [primary_key],
                         [bookmark_key], catalog.get('stream_alias'))
-
+    LOGGER.info("schema: %s", schema)
     url = get_url(stream_id)
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as transformer:
@@ -1060,7 +1060,7 @@ def sync_v3_stream(STATE, ctx, stream_id, params, primary_key="id", bookmark_key
         for row in get_v3_records(stream_id, url, params, 'results', "paging"):
             # Parsing the string formatted date to datetime object
             modified_time = utils.strptime_to_utc(row[bookmark_key])
-
+            LOGGER.info("row: %s", row)
             # Checking the bookmark value is present on the record and it
             # is greater than or equal to defined previous bookmark value
             if modified_time and modified_time >= bookmark_value:
@@ -1089,11 +1089,11 @@ STREAMS = [
     # Do these first as they are incremental
     Stream('subscription_changes', sync_subscription_changes, ['timestamp', 'portalId', 'recipient'], 'startTimestamp', 'INCREMENTAL'),
     Stream('email_events', sync_email_events, ['id'], 'startTimestamp', 'INCREMENTAL'),
+    Stream('owners', sync_owners, ["id"], 'updatedAt', 'INCREMENTAL'),
 
     # Do these last as they are full table
     Stream('forms', sync_forms, ['guid'], 'updatedAt', 'FULL_TABLE'),
     Stream('workflows', sync_workflows, ['id'], 'updatedAt', 'FULL_TABLE'),
-    Stream('owners', sync_owners, ["id"], 'updatedAt', 'INCREMENTAL'),
     Stream('campaigns', sync_campaigns, ["id"], None, 'FULL_TABLE'),
     Stream('contact_lists', sync_contact_lists, ["listId"], 'updatedAt', 'FULL_TABLE'),
     Stream('contacts', sync_contacts, ["vid"], 'versionTimestamp', 'FULL_TABLE'),
