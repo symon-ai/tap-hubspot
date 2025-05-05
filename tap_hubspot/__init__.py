@@ -1020,7 +1020,6 @@ def get_v3_records(tap_stream_id, url, params, path, more_key):
     """
     with metrics.record_counter(tap_stream_id) as counter:
         while True:
-            LOGGER.info("URL %s", url)
             data = request(url, params).json()
 
             if data.get(path) is None:
@@ -1033,7 +1032,7 @@ def get_v3_records(tap_stream_id, url, params, path, more_key):
 
             if not data.get(more_key):
                 break
-            
+
             params['after'] = data.get(more_key).get('next').get('after')
 
 
@@ -1047,12 +1046,10 @@ def sync_v3_stream(STATE, ctx, stream_id, params, primary_key="id", bookmark_key
     bookmark_value = utils.strptime_with_tz(
         get_start(STATE, stream_id, bookmark_key))
     max_bk_value = bookmark_value
-    LOGGER.info(f"Sync {stream_id} from %s", bookmark_value)
 
     schema = load_schema(stream_id)
     singer.write_schema(stream_id, schema, [primary_key],
                         [bookmark_key], catalog.get('stream_alias'))
-    LOGGER.info("schema: %s", schema)
     url = get_url(stream_id)
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as transformer:
@@ -1062,10 +1059,10 @@ def sync_v3_stream(STATE, ctx, stream_id, params, primary_key="id", bookmark_key
         for row in get_v3_records(stream_id, url, params, 'results', "paging"):
             # Parsing the string formatted date to datetime object
             modified_time = utils.strptime_to_utc(row[bookmark_key])
-            LOGGER.info("row: %s", row)
             # Checking the bookmark value is present on the record and it
             # is greater than or equal to defined previous bookmark value
             if modified_time and modified_time >= bookmark_value:
+
                 # Transforms the data and filters out the selected fields from the catalog
                 record = transformer.transform(lift_properties_and_versions(row), schema, mdata)
                 singer.write_record(stream_id, record, catalog.get(
