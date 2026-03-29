@@ -4,24 +4,32 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-attrs = {version = "==25.4.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-backoff = {version = "==2.2.1", markers = "python_full_version >= \"3.13.0\" and python_version < \"4.0\""}
-certifi = {version = "==2026.1.4", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-charset-normalizer = {version = "==3.4.4", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+astroid = {version = "==3.3.11", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+attrs = {version = "==25.4.0", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+backoff = {version = "==2.2.1", markers = "python_version >= \"3.13\" and python_version < \"4.0\""}
+certifi = {version = "==2026.1.4", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+charset-normalizer = {version = "==3.4.4", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
 ciso8601 = {version = "==2.3.3", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-idna = {version = "==3.11", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+colorama = {version = "==0.4.6", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\" and sys_platform == \"win32\""}
+dill = {version = "==0.4.1", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+idna = {version = "==3.11", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+isort = {version = "==6.1.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
 jsonschema = {version = "==2.6.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-python-dateutil = {version = "==2.9.0.post0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+mccabe = {version = "==0.6.1", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+nose = {version = "==1.3.7", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+platformdirs = {version = "==4.9.4", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+pylint = {version = "==3.3.9", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+python-dateutil = {version = "==2.9.0.post0", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
 pytz = {version = "==2025.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-requests-mock = {version = "==1.12.1", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-requests = {version = "==2.32.5", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-simplejson = {version = "==3.20.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+requests-mock = {version = "==1.12.1", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+requests = {version = "==2.32.5", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+simplejson = {version = "==3.20.2", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
 singer-python = {version = "==6.3.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-six = {version = "==1.17.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-urllib3 = {version = "==2.6.3", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+six = {version = "==1.17.0", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+tomlkit = {version = "==0.14.0", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+urllib3 = {version = "==2.6.3", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
 
 [dev-packages]
 
 [requires]
 python_version = "3.13"
-python_full_version = "3.13.3"
