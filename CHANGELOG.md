@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.0
+   * Security: Upgrade requests library from 2.32.5 to 2.33.1 to address CVE-2026-25645
+   * CVE-2026-25645 fixes a predictable filename vulnerability in the requests.utils.extract_zipped_paths() utility function
+
 ## 3.0.0
    * Upgrade Owners API endpoint [#256](https://github.com/singer-io/tap-hubspot/pull/256)
    
