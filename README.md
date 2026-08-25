@@ -10,7 +10,7 @@ This tap:
   - [Contacts](https://developers.hubspot.com/docs/methods/contacts/get_contacts)
   - [Contact Lists](http://developers.hubspot.com/docs/methods/lists/get_lists)
   - [Deals](http://developers.hubspot.com/docs/methods/deals/get_deals_modified)
-  - [Deal Pipelines](https://developers.hubspot.com/docs/methods/deal-pipelines/get-all-deal-pipelines)
+  - [Deal Pipelines](https://developers.hubspot.com/docs/api-reference/latest/crm/pipelines/guide)
   - [Email Events](http://developers.hubspot.com/docs/methods/email/get_events)
   - [Engagements](https://developers.hubspot.com/docs/methods/engagements/get-all-engagements)
   - [Forms](http://developers.hubspot.com/docs/methods/forms/v2/get_forms)

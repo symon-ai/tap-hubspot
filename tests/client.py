@@ -12,6 +12,61 @@ from base import HubspotBaseTest
 
 DEBUG = False
 BASE_URL = "https://api.hubapi.com"
+DEAL_PIPELINES_URL = f"{BASE_URL}/crm/pipelines/2026-03/deals"
+
+
+def _parse_pipeline_bool(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == 'true'
+    return bool(value)
+
+
+def _parse_pipeline_probability(value):
+    if value is None or value == '':
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_deal_pipeline(row):
+    """Map Pipelines API 2026-03 records onto the existing deal_pipelines schema."""
+    stages = []
+    for stage in row.get('stages') or []:
+        stage_metadata = stage.get('metadata') or {}
+        probability = _parse_pipeline_probability(
+            stage_metadata.get('probability', stage.get('probability')))
+        archived = _parse_pipeline_bool(stage.get('archived'))
+        active = stage.get('active')
+        if archived is not None:
+            active = not archived
+        stages.append({
+            'stageId': stage.get('stageId') or stage.get('id'),
+            'label': stage.get('label'),
+            'probability': probability,
+            'active': active,
+            'displayOrder': stage.get('displayOrder'),
+            'closedWon': (probability == 1.0) if probability is not None else stage.get('closedWon'),
+        })
+
+    archived = _parse_pipeline_bool(row.get('archived'))
+    active = row.get('active')
+    if archived is not None:
+        active = not archived
+
+    return {
+        'pipelineId': row.get('pipelineId') or row.get('id'),
+        'label': row.get('label'),
+        'displayOrder': row.get('displayOrder'),
+        'active': active,
+        'staticDefault': row.get('staticDefault'),
+        'stages': stages,
+    }
 
 
 class TestClient():
@@ -416,14 +471,17 @@ class TestClient():
 
     def get_deal_pipelines(self):
         """
-        Get all deal_pipelines.
+        Get all deal_pipelines, including archived, and map onto the V1 schema.
         """
-        url = f"{BASE_URL}/deals/v1/pipelines"
         records = []
 
-        response = self.get(url)
-        records.extend(response)
+        response = self.get(DEAL_PIPELINES_URL)
+        records.extend(response.get('results') or [])
 
+        archived = self.get(DEAL_PIPELINES_URL, params={'archived': 'true'})
+        records.extend(archived.get('results') or [])
+
+        records = [normalize_deal_pipeline(record) for record in records]
         records = self.denest_properties('deal_pipelines', records)
         return records
 
@@ -845,40 +903,35 @@ class TestClient():
 
     def create_deal_pipelines(self):
         """
-        HubSpot API
-        https://legacydocs.hubspot.com/docs/methods/pipelines/create_new_pipeline
+        HubSpot Pipelines API 2026-03
+        https://developers.hubspot.com/docs/api-reference/latest/crm/pipelines/guide
         """
         timestamp1 = str(datetime.datetime.now().timestamp()).replace(".", "")
         timestamp2 = str(datetime.datetime.now().timestamp()).replace(".", "")
-        url = f"{BASE_URL}/crm-pipelines/v1/pipelines/deals"
         data = {
-            "pipelineId": timestamp1,
             "label": f"API test ticket pipeline {timestamp1}",
             "displayOrder": 2,
-            "active": True,
             "stages": [
                 {
-                    "stageId": f"example_stage {timestamp1}",
                     "label": f"Example stage{timestamp1}",
                     "displayOrder": 1,
                     "metadata": {
-                        "probability": 0.5
+                        "probability": "0.5"
                     }
                 },
                 {
-                    "stageId": f"another_example_stage{timestamp2}",
                     "label": f"Another example stage{timestamp2}",
                     "displayOrder": 2,
                     "metadata": {
-                        "probability": 1.0
+                        "probability": "1.0"
                     }
                 }
             ]
         }
 
         # generate a record
-        response = self.post(url, data)
-        records = [response]
+        response = self.post(DEAL_PIPELINES_URL, data)
+        records = [normalize_deal_pipeline(response)]
         return records
 
     def create_deals(self):
@@ -1335,20 +1388,18 @@ class TestClient():
         :param:
         :return:
         """
-        url = f"{BASE_URL}/crm-pipelines/v1/pipelines/deals/{pipeline_id}"
+        url = f"{DEAL_PIPELINES_URL}/{pipeline_id}"
 
         record_uuid = str(uuid.uuid4()).replace('-', '')[:20]
         data = {
             "label": f"Updated {record_uuid}",
             "displayOrder": 4,
-            "active": True,
             "stages": [
                 {
-                    "stageId": record_uuid,
                     "label": record_uuid,
                     "displayOrder": 1,
                     "metadata": {
-                        "probability": 0.5
+                        "probability": "0.5"
                     }
                 },
             ]
@@ -1473,24 +1524,25 @@ class TestClient():
 
     def delete_deal_pipelines(self, records=[], count=10):
         """
-        Delete older records based on timestamp primary key
-        https://legacydocs.hubspot.com/docs/methods/pipelines/delete_pipeline
+        Delete pipelines created by this client (label prefix "API test").
+        https://developers.hubspot.com/docs/api-reference/latest/crm/pipelines/guide
         """
         if not records:
             records = self.get_deal_pipelines()
 
-        record_ids_to_delete = [record['pipelineId'] for record in records]
-        if len(record_ids_to_delete) == 1 or \
-           len(record_ids_to_delete) <= count:
+        if len(records) == 1 or len(records) <= count:
             raise RuntimeError(
                 "delete count is greater or equal to the number of existing records for deal_pipelines, "
                 "need to have at least one record remaining"
             )
-        for record_id in record_ids_to_delete:
-            if record_id == 'default' or len(record_id) > 16: # not a timestamp, not made by this client
-                continue # skip
+        for record in records:
+            record_id = record.get('pipelineId')
+            label = record.get('label') or ''
+            # 2026-03 generates pipeline ids; only delete records this client created
+            if record_id == 'default' or not label.startswith('API test'):
+                continue
 
-            url = f"{BASE_URL}/crm-pipelines/v1/pipelines/deals/{record_id}"
+            url = f"{DEAL_PIPELINES_URL}/{record_id}"
             self.delete(url)
 
             count -= 1
@@ -1515,11 +1567,11 @@ class TestClient():
             "client_secret": self.CONFIG['client_secret'],
         }
 
-        response = requests.post(BASE_URL + "/oauth/v1/token", data=payload)
+        response = requests.post(BASE_URL + "/oauth/2026-03/token", data=payload)
         response.raise_for_status()
         auth = response.json()
         self.CONFIG['access_token'] = auth['access_token']
-        self.CONFIG['refresh_token'] = auth['refresh_token']
+        self.CONFIG['refresh_token'] = auth.get('refresh_token') or self.CONFIG['refresh_token']
         self.CONFIG['token_expires'] = (
             datetime.datetime.utcnow() +
             datetime.timedelta(seconds=auth['expires_in'] - 600))
