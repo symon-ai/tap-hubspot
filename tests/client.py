@@ -9,6 +9,7 @@ import uuid
 import random
 from  tap_tester import menagerie
 from base import HubspotBaseTest
+from tap_hubspot import map_deal_pipeline
 
 DEBUG = False
 BASE_URL = "https://api.hubapi.com"
@@ -418,11 +419,12 @@ class TestClient():
         """
         Get all deal_pipelines.
         """
-        url = f"{BASE_URL}/deals/v1/pipelines"
+        url = f"{BASE_URL}/crm/pipelines/2026-03/deals"
         records = []
 
         response = self.get(url)
-        records.extend(response)
+        records.extend(map_deal_pipeline(pipeline)
+                       for pipeline in response['results'])
 
         records = self.denest_properties('deal_pipelines', records)
         return records
@@ -1515,7 +1517,7 @@ class TestClient():
             "client_secret": self.CONFIG['client_secret'],
         }
 
-        response = requests.post(BASE_URL + "/oauth/v1/token", data=payload)
+        response = requests.post(BASE_URL + "/oauth/2026-03/token", data=payload)
         response.raise_for_status()
         auth = response.json()
         self.CONFIG['access_token'] = auth['access_token']
