@@ -85,7 +85,7 @@ ENDPOINTS = {
     "deals_v3_batch_read":  "/crm/v3/objects/deals/batch/read",
     "deals_v3_properties":  "/crm/v3/properties/deals",
 
-    "deal_pipelines":       "/deals/v1/pipelines",
+    "deal_pipelines":       "/crm/pipelines/2026-03/deals",
 
     "campaigns_all":        "/email/public/v1/campaigns/by-id",
     "campaigns_detail":     "/email/public/v1/campaigns/{campaign_id}",
@@ -229,7 +229,7 @@ def acquire_access_token_from_refresh_token():
     }
 
 
-    resp = requests.post(BASE_URL + "/oauth/v1/token", data=payload)
+    resp = requests.post(BASE_URL + "/oauth/2026-03/token", data=payload)
     if resp.status_code == 400:
         raise SymonException(f'Failed to connect to Hubspot. Please ensure the OAuth token is up to date.', 'hubspot.AuthInvalid')
     
@@ -952,16 +952,40 @@ def sync_engagements(STATE, ctx):
     singer.write_state(STATE)
     return STATE
 
+def map_deal_pipeline(pipeline):
+    stages = []
+    for stage in pipeline['stages']:
+        probability = stage['metadata'].get('probability')
+        probability = float(probability) if probability is not None else None
+        stages.append({
+            'stageId': stage['id'],
+            'label': stage['label'],
+            'probability': probability,
+            'active': not stage['archived'],
+            'displayOrder': stage['displayOrder'],
+            'closedWon': probability == 1.0 if probability is not None else None,
+        })
+
+    return {
+        'pipelineId': pipeline['id'],
+        'stages': stages,
+        'label': pipeline['label'],
+        'active': not pipeline['archived'],
+        'displayOrder': pipeline['displayOrder'],
+        'staticDefault': None,
+    }
+
+
 def sync_deal_pipelines(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
     mdata = metadata.to_map(catalog.get('metadata'))
     schema = load_schema('deal_pipelines')
     singer.write_schema('deal_pipelines', schema, ['pipelineId'], catalog.get('stream_alias'))
     LOGGER.info('sync_deal_pipelines')
-    data = request(get_url('deal_pipelines')).json()
+    data = request(get_url('deal_pipelines')).json()['results']
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
-        for row in data:
-            record = bumble_bee.transform(row, schema, mdata)
+        for pipeline in data:
+            record = bumble_bee.transform(map_deal_pipeline(pipeline), schema, mdata)
             singer.write_record("deal_pipelines", record, catalog.get('stream_alias'), time_extracted=utils.now())
     singer.write_state(STATE)
     return STATE
