@@ -38,6 +38,8 @@ class StateFields:
     this_stream = 'this_stream'
 
 BASE_URL = "https://api.hubapi.com"
+# v1 OAuth (/oauth/v1/token) is deprecated; fully retired Feb 16, 2027.
+OAUTH_TOKEN_URL = BASE_URL + "/oauth/2026-03/token"
 
 CONTACTS_BY_COMPANY = "contacts_by_company"
 
@@ -85,7 +87,8 @@ ENDPOINTS = {
     "deals_v3_batch_read":  "/crm/v3/objects/deals/batch/read",
     "deals_v3_properties":  "/crm/v3/properties/deals",
 
-    "deal_pipelines":       "/deals/v1/pipelines",
+    # Pipelines API V1 (/deals/v1/pipelines, /crm-pipelines/v1/...) sunsets Dec 4, 2026.
+    "deal_pipelines":       "/crm/pipelines/2026-03/deals",
 
     "campaigns_all":        "/email/public/v1/campaigns/by-id",
     "campaigns_detail":     "/email/public/v1/campaigns/{campaign_id}",
@@ -229,7 +232,7 @@ def acquire_access_token_from_refresh_token():
     }
 
 
-    resp = requests.post(BASE_URL + "/oauth/v1/token", data=payload)
+    resp = requests.post(OAUTH_TOKEN_URL, data=payload)
     if resp.status_code == 400:
         raise SymonException(f'Failed to connect to Hubspot. Please ensure the OAuth token is up to date.', 'hubspot.AuthInvalid')
     
@@ -252,7 +255,7 @@ def acquire_access_token_from_refresh_token():
 
     auth = resp.json()
     CONFIG['access_token'] = auth['access_token']
-    CONFIG['refresh_token'] = auth['refresh_token']
+    CONFIG['refresh_token'] = auth.get('refresh_token') or CONFIG['refresh_token']
     CONFIG['token_expires'] = (
         datetime.datetime.utcnow() +
         datetime.timedelta(seconds=auth['expires_in'] - 600))
@@ -952,16 +955,90 @@ def sync_engagements(STATE, ctx):
     singer.write_state(STATE)
     return STATE
 
+def _parse_pipeline_bool(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == 'true'
+    return bool(value)
+
+
+def _parse_pipeline_probability(value):
+    if value is None or value == '':
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_pipeline_closed_won(stage_metadata, probability, stage):
+    is_closed = _parse_pipeline_bool(stage_metadata.get('isClosed'))
+    if is_closed is not None and probability is not None:
+        return is_closed and probability == 1.0
+    if probability is not None:
+        return probability == 1.0
+    return stage.get('closedWon')
+
+
+def normalize_deal_pipeline(row):
+    """Map Pipelines API 2026-03 records onto the existing deal_pipelines schema.
+
+    The Singer schema still uses V1 field names (pipelineId, stageId, active,
+    closedWon) so existing imports keep working after the V1 sunset.
+    """
+    stages = []
+    for stage in row.get('stages') or []:
+        stage_metadata = stage.get('metadata') or {}
+        probability = _parse_pipeline_probability(
+            stage_metadata.get('probability', stage.get('probability')))
+        archived = _parse_pipeline_bool(stage.get('archived'))
+        active = stage.get('active')
+        if archived is not None:
+            active = not archived
+        stages.append({
+            'stageId': stage.get('stageId') or stage.get('id'),
+            'label': stage.get('label'),
+            'probability': probability,
+            'active': active,
+            'displayOrder': stage.get('displayOrder'),
+            'closedWon': _parse_pipeline_closed_won(stage_metadata, probability, stage),
+        })
+
+    archived = _parse_pipeline_bool(row.get('archived'))
+    active = row.get('active')
+    if archived is not None:
+        active = not archived
+
+    return {
+        'pipelineId': row.get('pipelineId') or row.get('id'),
+        'label': row.get('label'),
+        'displayOrder': row.get('displayOrder'),
+        'active': active,
+        'staticDefault': row.get('staticDefault'),
+        'stages': stages,
+    }
+
+
+def _get_deal_pipeline_rows():
+    url = get_url('deal_pipelines')
+    rows = list(request(url).json().get('results') or [])
+    archived_rows = request(url, params={'archived': 'true'}).json().get('results') or []
+    rows.extend(archived_rows)
+    return rows
+
+
 def sync_deal_pipelines(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
     mdata = metadata.to_map(catalog.get('metadata'))
     schema = load_schema('deal_pipelines')
     singer.write_schema('deal_pipelines', schema, ['pipelineId'], catalog.get('stream_alias'))
     LOGGER.info('sync_deal_pipelines')
-    data = request(get_url('deal_pipelines')).json()
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
-        for row in data:
-            record = bumble_bee.transform(row, schema, mdata)
+        for row in _get_deal_pipeline_rows():
+            record = bumble_bee.transform(normalize_deal_pipeline(row), schema, mdata)
             singer.write_record("deal_pipelines", record, catalog.get('stream_alias'), time_extracted=utils.now())
     singer.write_state(STATE)
     return STATE
