@@ -34,6 +34,15 @@ def _parse_pipeline_probability(value):
         return None
 
 
+def _parse_pipeline_closed_won(stage_metadata, probability, stage):
+    is_closed = _parse_pipeline_bool(stage_metadata.get('isClosed'))
+    if is_closed is not None and probability is not None:
+        return is_closed and probability == 1.0
+    if probability is not None:
+        return probability == 1.0
+    return stage.get('closedWon')
+
+
 def normalize_deal_pipeline(row):
     """Map Pipelines API 2026-03 records onto the existing deal_pipelines schema."""
     stages = []
@@ -51,7 +60,7 @@ def normalize_deal_pipeline(row):
             'probability': probability,
             'active': active,
             'displayOrder': stage.get('displayOrder'),
-            'closedWon': (probability == 1.0) if probability is not None else stage.get('closedWon'),
+            'closedWon': _parse_pipeline_closed_won(stage_metadata, probability, stage),
         })
 
     archived = _parse_pipeline_bool(row.get('archived'))

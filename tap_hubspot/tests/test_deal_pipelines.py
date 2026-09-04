@@ -55,6 +55,28 @@ class TestNormalizeDealPipeline(unittest.TestCase):
         self.assertFalse(record["stages"][2]["active"])
         self.assertFalse(record["stages"][2]["closedWon"])
 
+    def test_open_stage_with_full_probability_is_not_closed_won(self):
+        row = {
+            "id": "custom",
+            "label": "Custom Pipeline",
+            "displayOrder": 0,
+            "archived": False,
+            "stages": [
+                {
+                    "id": "negotiation",
+                    "label": "Final Negotiation",
+                    "displayOrder": 0,
+                    "archived": False,
+                    "metadata": {"isClosed": "false", "probability": "1.0"},
+                },
+            ],
+        }
+
+        record = normalize_deal_pipeline(row)
+
+        self.assertEqual(record["stages"][0]["probability"], 1.0)
+        self.assertFalse(record["stages"][0]["closedWon"])
+
     def test_passthrough_legacy_v1_payload(self):
         row = {
             "pipelineId": "custom",
