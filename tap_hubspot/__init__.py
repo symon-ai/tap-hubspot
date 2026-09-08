@@ -229,7 +229,7 @@ def acquire_access_token_from_refresh_token():
     }
 
 
-    resp = requests.post(BASE_URL + "/oauth/v1/token", data=payload)
+    resp = requests.post(BASE_URL + "/oauth/2026-03/token", data=payload)
     if resp.status_code == 400:
         raise SymonException(f'Failed to connect to Hubspot. Please ensure the OAuth token is up to date.', 'hubspot.AuthInvalid')
     
