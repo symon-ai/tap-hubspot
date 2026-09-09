@@ -2,9 +2,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from tap_hubspot import acquire_access_token_from_refresh_token
-from tap_hubspot import BASE_URL
-from tap_hubspot import CONFIG
+from tap_hubspot import BASE_URL, CONFIG, acquire_access_token_from_refresh_token
 
 
 class TestOAuthRefresh(unittest.TestCase):
