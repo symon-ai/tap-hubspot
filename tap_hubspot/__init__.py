@@ -1012,12 +1012,17 @@ def normalize_deal_pipeline(row):
     if archived is not None:
         active = not archived
 
+    pipeline_id = row.get('pipelineId') or row.get('id')
+    static_default = row.get('staticDefault')
+    if static_default is None:
+        static_default = pipeline_id == 'default'
+
     return {
-        'pipelineId': row.get('pipelineId') or row.get('id'),
+        'pipelineId': pipeline_id,
         'label': row.get('label'),
         'displayOrder': row.get('displayOrder'),
         'active': active,
-        'staticDefault': row.get('staticDefault'),
+        'staticDefault': static_default,
         'stages': stages,
     }
 
