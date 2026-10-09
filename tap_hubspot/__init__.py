@@ -972,7 +972,7 @@ def map_deal_pipeline(pipeline):
         'label': pipeline['label'],
         'active': not pipeline['archived'],
         'displayOrder': pipeline['displayOrder'],
-        'staticDefault': None,
+        'staticDefault': pipeline['id'] == 'default',
     }
 
 
